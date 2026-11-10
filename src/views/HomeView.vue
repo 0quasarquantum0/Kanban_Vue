@@ -1,15 +1,7 @@
 <script setup lang="ts">
-// Placeholder view for phase 0. The board UI arrives in phase 1.
+import BoardView from '@/components/BoardView.vue'
 </script>
 
 <template>
-  <main class="home">
-    <h1>Kanban</h1>
-  </main>
+  <BoardView />
 </template>
-
-<style scoped>
-.home {
-  padding: var(--space-4);
-}
-</style>

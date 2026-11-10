@@ -6,6 +6,10 @@
   --color-text-muted: #656d76;
   --color-border: #d0d7de;
   --color-accent: #2f6feb;
+  --color-column: #e9ebef;
+  --color-label-bg: #dbe7ff;
+  --color-label-text: #1d4ed8;
+  --shadow-card: 0 1px 2px rgb(31 35 40 / 8%);
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;
