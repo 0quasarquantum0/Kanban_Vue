@@ -22,11 +22,15 @@ defineProps<{
       </div>
     </header>
 
-    <!-- Default slot: the parent passes the cards in as children. -->
-    <div v-if="cardCount > 0" class="column__cards">
+    <!--
+      Default slot: the parent passes the cards in as children.
+      TransitionGroup renders the wrapping div and animates its keyed children as they
+      enter, leave and change position. The empty message is one of those children.
+    -->
+    <TransitionGroup tag="div" class="column__cards" name="card-list">
       <slot />
-    </div>
-    <p v-else class="column__empty">No cards yet</p>
+      <p v-if="cardCount === 0" key="empty" class="column__empty">No cards yet</p>
+    </TransitionGroup>
 
     <footer class="column__footer">
       <slot name="footer" />
@@ -39,7 +43,6 @@ defineProps<{
   display: flex;
   flex-direction: column;
   flex: 0 0 18rem;
-  max-height: 100%;
   padding: var(--space-3);
   background: var(--color-column);
   border-radius: var(--radius);
@@ -73,11 +76,50 @@ defineProps<{
   gap: var(--space-2);
   /* Room for the drop indicator above the first card and below the last. */
   padding-block: var(--space-2);
-  overflow-y: auto;
+  /* Clip cards while they animate so they never poke out of the column or cause a scrollbar. */
+  overflow: hidden;
+  /* Positioning context for cards that are animating out. */
+  position: relative;
+}
+
+/*
+  The cards come from the parent through the slot, so they don't carry this component's
+  scope id. :deep() lets these rules reach them.
+*/
+.column__cards :deep(.card-list-enter-active),
+.column__cards :deep(.card-list-leave-active) {
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.column__cards :deep(.card-list-enter-from),
+.column__cards :deep(.card-list-leave-to) {
+  opacity: 0;
+  transform: scale(0.96);
+}
+
+/* Applied to siblings whose position changed; Vue animates them from old to new place. */
+.column__cards :deep(.card-list-move) {
+  transition: transform 0.25s ease;
+}
+
+/* Take leaving items out of the flow so the siblings below can slide up straight away. */
+.column__cards :deep(.card-list-leave-active) {
+  position: absolute;
+  inset-inline: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .column__cards :deep(.card-list-enter-active),
+  .column__cards :deep(.card-list-leave-active),
+  .column__cards :deep(.card-list-move) {
+    transition: none;
+  }
 }
 
 .column__empty {
-  margin: var(--space-2) 0;
+  margin: 0;
   padding: var(--space-4) var(--space-2);
   font-size: 0.8125rem;
   text-align: center;

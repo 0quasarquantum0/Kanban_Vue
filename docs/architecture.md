@@ -1,6 +1,6 @@
 # Architecture
 
-_Last updated: phase 3 (drag and drop)._
+_Last updated: phase 4 (transitions)._
 
 This file shows the project as it currently stands. It is updated at the end of every phase and only diagrams what exists.
 
@@ -26,7 +26,7 @@ flowchart TD
   store[("stores/kanban.ts<br/>useKanbanStore")]
   board -. "reads getters, calls actions,<br/>v-model writes column.title" .-> store
 
-  board -- "v-model:title, prop cardCount<br/>(v-for over columns)" --> column["components/KanbanColumn.vue<br/>slots: #actions, default, #footer<br/>empty state when cardCount is 0"]
+  board -- "v-model:title, prop cardCount<br/>(v-for over columns)" --> column["components/KanbanColumn.vue<br/>slots: #actions, default, #footer<br/>TransitionGroup around the default slot<br/>empty state when cardCount is 0"]
   board -- "prop card<br/>emits update(patch), delete<br/>(into column's default slot)" --> card["components/KanbanCard.vue"]
   board -- "props label, placeholder<br/>emits add(title)<br/>(column #footer, and once for 'Add column')" --> add["components/AddItemForm.vue"]
 
@@ -62,6 +62,26 @@ sequenceDiagram
 - Reactive state: `draggingCardId`, `overColumnId`, `overIndex` (counted among the column's cards without the dragged one, which is the final index `moveCard` expects).
 - `dropPosition(columnId, cardIds, cardId)` returns `'before' | 'after' | null`; `BoardView` binds it to `data-drop` on each card.
 - Visual state is global CSS in `src/assets/main.css`: `.is-dragging`, `.is-drop-target`, and the `[data-drop]` indicator line.
+
+## Transitions
+
+`KanbanColumn` wraps its default slot in `<TransitionGroup tag="div" name="card-list">`, so every keyed card passed in by `BoardView` animates without either the card or the board knowing about it.
+
+```mermaid
+stateDiagram-v2
+  [*] --> Entering: card added, or moved in from another column
+  Entering --> Idle: card-list-enter-from → enter-active (fade + scale in, 0.2s)
+  Idle --> Moving: a sibling was added, removed or reordered
+  Moving --> Idle: card-list-move (FLIP transform, 0.25s)
+  Idle --> Leaving: card deleted, or moved to another column
+  Leaving --> [*]: card-list-leave-active → leave-to (fade + scale out, 0.2s, position absolute)
+```
+
+- The "No cards yet" message is a keyed child of the same group, so it fades in and out too.
+- A move between columns is a leave in one group and an enter in the other, not a single slide.
+- The styles live in `KanbanColumn.vue` and use `:deep()` because slotted cards don't carry the column's scope id.
+- `prefers-reduced-motion: reduce` sets all three transitions to `none`.
+- Columns grow to their content and clip it (`overflow: hidden`); `.board__columns` in `BoardView` scrolls in both directions.
 
 ## Store
 
@@ -134,5 +154,4 @@ flowchart LR
 
 ## Not built yet
 
-- Transitions: phase 4
 - Persistence: phase 5

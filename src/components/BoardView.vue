@@ -109,7 +109,8 @@ function removeColumn(column: Column) {
   align-items: flex-start;
   gap: var(--space-4);
   min-height: 0;
-  overflow-x: auto;
+  /* Tall columns scroll the whole board, not themselves. */
+  overflow: auto;
 }
 
 .board__column-action {
