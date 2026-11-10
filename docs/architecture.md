@@ -1,6 +1,6 @@
 # Architecture
 
-_Last updated: phase 2 (Pinia store and editing)._
+_Last updated: phase 3 (drag and drop)._
 
 This file shows the project as it currently stands. It is updated at the end of every phase and only diagrams what exists.
 
@@ -30,9 +30,38 @@ flowchart TD
   board -- "prop card<br/>emits update(patch), delete<br/>(into column's default slot)" --> card["components/KanbanCard.vue"]
   board -- "props label, placeholder<br/>emits add(title)<br/>(column #footer, and once for 'Add column')" --> add["components/AddItemForm.vue"]
 
+  dnd[["composables/useDragAndDrop.ts"]]
+  board -. "calls once in setup;<br/>attaches its handlers to column and card roots" .-> dnd
+  dnd -. "onDrop → moveCard" .-> store
+
   column -- "v-model (title)" --> inlineCol["components/InlineEdit.vue<br/>defineModel"]
   card -- ":model-value + @update:model-value<br/>(title)" --> inlineCard["components/InlineEdit.vue"]
 ```
+
+## Drag and drop
+
+`composables/useDragAndDrop.ts` wraps the native HTML5 drag events. `BoardView` calls it once, passing `store.moveCard` as `onDrop`, and binds the handlers in its template. The listeners and attributes are not declared as props or emits, so they fall through to the root elements of `KanbanCard` and `KanbanColumn`.
+
+```mermaid
+sequenceDiagram
+  participant Card as KanbanCard root (draggable, data-card-id)
+  participant Col as KanbanColumn root (drop zone)
+  participant DnD as useDragAndDrop
+  participant Store as kanban store
+
+  Card->>DnD: dragstart → onDragStart(cardId)
+  Note over DnD: draggingCardId = cardId
+  Col->>DnD: dragover.prevent → onDragOver(columnId)
+  Note over DnD: overColumnId, overIndex from pointer Y vs card midpoints
+  Col->>DnD: dragleave → onDragLeave (ignored when moving onto a child)
+  Col->>DnD: drop.prevent → onDrop(columnId)
+  DnD->>Store: moveCard(cardId, columnId, index)
+  Card->>DnD: dragend → reset state
+```
+
+- Reactive state: `draggingCardId`, `overColumnId`, `overIndex` (counted among the column's cards without the dragged one, which is the final index `moveCard` expects).
+- `dropPosition(columnId, cardIds, cardId)` returns `'before' | 'after' | null`; `BoardView` binds it to `data-drop` on each card.
+- Visual state is global CSS in `src/assets/main.css`: `.is-dragging`, `.is-drop-target`, and the `[data-drop]` indicator line.
 
 ## Store
 
@@ -57,7 +86,7 @@ classDiagram
 
 - `firstBoard`, `columnsForBoard` and `cardsForColumn` are `computed` getters; the last two return lookup functions.
 - `deleteColumn` also deletes the column's cards.
-- `moveCard` places the card at `toIndex` in the target column (clamped). No UI calls it yet; drag and drop arrives in phase 3.
+- `moveCard` places the card at `toIndex` in the target column (clamped). It is called by the drag-and-drop composable.
 - Unit tests: `src/stores/__tests__/kanban.spec.ts` (`addCard`, `moveCard`, `deleteColumn`).
 
 ## Data model
@@ -105,5 +134,5 @@ flowchart LR
 
 ## Not built yet
 
-- Drag and drop (the UI for `moveCard`): phase 3
+- Transitions: phase 4
 - Persistence: phase 5

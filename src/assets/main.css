@@ -42,3 +42,36 @@ h1 {
   margin: 0;
   font-size: 1.5rem;
 }
+
+/* Drag-and-drop state. Set from BoardView on the column and card root elements. */
+.is-drop-target {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.is-dragging {
+  opacity: 0.4;
+}
+
+[data-drop] {
+  position: relative;
+}
+
+/* A line centred in the gap between cards; absolutely positioned so nothing shifts. */
+[data-drop='before']::before,
+[data-drop='after']::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  height: 2px;
+  background: var(--color-accent);
+  border-radius: 1px;
+}
+
+[data-drop='before']::before {
+  top: calc(var(--space-2) / -2 - 2px);
+}
+
+[data-drop='after']::after {
+  bottom: calc(var(--space-2) / -2 - 2px);
+}

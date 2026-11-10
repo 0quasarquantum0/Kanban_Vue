@@ -64,6 +64,7 @@ function formatDate(iso: string): string {
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-card);
+  cursor: grab;
 }
 
 .card__header {

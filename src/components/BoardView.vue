@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
+import { useDragAndDrop } from '@/composables/useDragAndDrop'
 import { useKanbanStore } from '@/stores/kanban'
 import type { Column } from '@/types'
 import AddItemForm from './AddItemForm.vue'
@@ -9,6 +10,18 @@ import KanbanColumn from './KanbanColumn.vue'
 const store = useKanbanStore()
 // storeToRefs keeps `board` reactive after destructuring. Actions are called on `store` directly.
 const { firstBoard: board } = storeToRefs(store)
+
+// Refs are destructured to the top level so the template unwraps them automatically.
+const {
+  draggingCardId,
+  overColumnId,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd,
+  dropPosition,
+} = useDragAndDrop({ onDrop: store.moveCard })
 
 function removeColumn(column: Column) {
   const count = column.cardIds.length
@@ -27,6 +40,10 @@ function removeColumn(column: Column) {
         :key="column.id"
         v-model:title="column.title"
         :card-count="column.cardIds.length"
+        :class="{ 'is-drop-target': overColumnId === column.id }"
+        @dragover.prevent="onDragOver($event, column.id)"
+        @dragleave="onDragLeave($event, column.id)"
+        @drop.prevent="onDrop($event, column.id)"
       >
         <template #actions>
           <button
@@ -43,6 +60,12 @@ function removeColumn(column: Column) {
           v-for="card in store.cardsForColumn(column.id)"
           :key="card.id"
           :card="card"
+          draggable="true"
+          :data-card-id="card.id"
+          :data-drop="dropPosition(column.id, column.cardIds, card.id)"
+          :class="{ 'is-dragging': draggingCardId === card.id }"
+          @dragstart="onDragStart($event, card.id)"
+          @dragend="onDragEnd"
           @update="store.updateCard(card.id, $event)"
           @delete="store.deleteCard(card.id)"
         />

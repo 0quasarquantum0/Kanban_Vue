@@ -49,7 +49,7 @@ defineProps<{
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--space-1);
 }
 
 .column__title {
@@ -71,20 +71,18 @@ defineProps<{
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  /* Room for the drop indicator above the first card and below the last. */
+  padding-block: var(--space-2);
   overflow-y: auto;
 }
 
 .column__empty {
-  margin: 0;
+  margin: var(--space-2) 0;
   padding: var(--space-4) var(--space-2);
   font-size: 0.8125rem;
   text-align: center;
   color: var(--color-text-muted);
   border: 1px dashed var(--color-border);
   border-radius: var(--radius);
-}
-
-.column__footer {
-  margin-top: var(--space-2);
 }
 </style>
