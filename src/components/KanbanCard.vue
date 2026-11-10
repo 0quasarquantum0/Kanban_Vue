@@ -1,8 +1,14 @@
 <script setup lang="ts">
-import type { Card } from '@/types'
+import type { Card, CardPatch } from '@/types'
+import InlineEdit from './InlineEdit.vue'
 
 defineProps<{
   card: Card
+}>()
+
+const emit = defineEmits<{
+  update: [patch: CardPatch]
+  delete: []
 }>()
 
 // Date-only ISO strings parse as UTC midnight, so format in UTC to avoid an off-by-one day.
@@ -19,7 +25,24 @@ function formatDate(iso: string): string {
 
 <template>
   <article class="card">
-    <h3 class="card__title">{{ card.title }}</h3>
+    <header class="card__header">
+      <h3 class="card__title">
+        <!-- The card is a prop, so we can't v-model it. This is v-model written out by hand. -->
+        <InlineEdit
+          :model-value="card.title"
+          label="Card title"
+          @update:model-value="emit('update', { title: $event })"
+        />
+      </h3>
+      <button
+        class="card__delete"
+        type="button"
+        :aria-label="`Delete card: ${card.title}`"
+        @click="emit('delete')"
+      >
+        ×
+      </button>
+    </header>
 
     <p v-if="card.description" class="card__description">{{ card.description }}</p>
 
@@ -43,7 +66,31 @@ function formatDate(iso: string): string {
   box-shadow: var(--shadow-card);
 }
 
+.card__header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.card__delete {
+  padding: 0 var(--space-1);
+  font-size: 1rem;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.card__delete:hover {
+  color: var(--color-danger);
+  background: var(--color-hover);
+}
+
 .card__title {
+  flex: 1;
+  min-width: 0;
   margin: 0;
   font-size: 0.9375rem;
   font-weight: 600;
@@ -51,7 +98,7 @@ function formatDate(iso: string): string {
 }
 
 .card__description {
-  margin: var(--space-1) 0 0;
+  margin: var(--space-1) var(--space-1) 0;
   font-size: 0.8125rem;
   color: var(--color-text-muted);
   overflow-wrap: anywhere;

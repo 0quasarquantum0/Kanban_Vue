@@ -1,21 +1,19 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { createSeedState } from '@/seed'
-import type { Card, Column, KanbanState } from '@/types'
+import { storeToRefs } from 'pinia'
+import { useKanbanStore } from '@/stores/kanban'
+import type { Column } from '@/types'
+import AddItemForm from './AddItemForm.vue'
 import KanbanCard from './KanbanCard.vue'
 import KanbanColumn from './KanbanColumn.vue'
 
-// Phase 1: local state in a plain ref. Phase 2 moves this into a Pinia store.
-const state = ref<KanbanState>(createSeedState())
+const store = useKanbanStore()
+// storeToRefs keeps `board` reactive after destructuring. Actions are called on `store` directly.
+const { firstBoard: board } = storeToRefs(store)
 
-const board = Object.values(state.value.boards)[0]
-
-function columnsFor(columnIds: string[]): Column[] {
-  return columnIds.flatMap((id) => state.value.columns[id] ?? [])
-}
-
-function cardsFor(column: Column): Card[] {
-  return column.cardIds.flatMap((id) => state.value.cards[id] ?? [])
+function removeColumn(column: Column) {
+  const count = column.cardIds.length
+  const message = `Delete "${column.title}" and its ${count} ${count === 1 ? 'card' : 'cards'}?`
+  if (count === 0 || window.confirm(message)) store.deleteColumn(column.id)
 }
 </script>
 
@@ -25,25 +23,46 @@ function cardsFor(column: Column): Card[] {
 
     <div class="board__columns">
       <KanbanColumn
-        v-for="column in columnsFor(board.columnIds)"
+        v-for="column in store.columnsForBoard(board.id)"
         :key="column.id"
-        :title="column.title"
+        v-model:title="column.title"
         :card-count="column.cardIds.length"
       >
         <template #actions>
           <button
             class="board__column-action"
             type="button"
-            disabled
-            :aria-label="`Actions for ${column.title} (coming in phase 2)`"
-            title="Column actions arrive in phase 2"
+            :aria-label="`Delete column: ${column.title}`"
+            @click="removeColumn(column)"
           >
-            ⋯
+            ×
           </button>
         </template>
 
-        <KanbanCard v-for="card in cardsFor(column)" :key="card.id" :card="card" />
+        <KanbanCard
+          v-for="card in store.cardsForColumn(column.id)"
+          :key="card.id"
+          :card="card"
+          @update="store.updateCard(card.id, $event)"
+          @delete="store.deleteCard(card.id)"
+        />
+
+        <template #footer>
+          <AddItemForm
+            label="Add card"
+            placeholder="Card title"
+            @add="store.addCard(column.id, $event)"
+          />
+        </template>
       </KanbanColumn>
+
+      <div class="board__add-column">
+        <AddItemForm
+          label="Add column"
+          placeholder="Column title"
+          @add="store.addColumn(board.id, $event)"
+        />
+      </div>
     </div>
   </div>
   <p v-else class="board__missing">No board found.</p>
@@ -77,6 +96,19 @@ function cardsFor(column: Column): Card[] {
   color: var(--color-text-muted);
   background: none;
   border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.board__column-action:hover {
+  color: var(--color-danger);
+  background: var(--color-hover);
+}
+
+.board__add-column {
+  flex: 0 0 18rem;
+  padding: var(--space-2);
+  background: var(--color-column);
   border-radius: var(--radius);
 }
 

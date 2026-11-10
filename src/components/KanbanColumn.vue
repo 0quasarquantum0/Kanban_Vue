@@ -1,6 +1,10 @@
 <script setup lang="ts">
+import InlineEdit from './InlineEdit.vue'
+
+// A named model: the parent binds it with v-model:title.
+const title = defineModel<string>('title', { required: true })
+
 defineProps<{
-  title: string
   cardCount: number
 }>()
 </script>
@@ -8,7 +12,9 @@ defineProps<{
 <template>
   <section class="column">
     <header class="column__header">
-      <h2 class="column__title">{{ title }}</h2>
+      <h2 class="column__title">
+        <InlineEdit v-model="title" label="Column title" />
+      </h2>
       <span class="column__count">{{ cardCount }}</span>
       <div class="column__actions">
         <!-- Named slot: the parent decides which buttons appear here. -->
@@ -21,6 +27,10 @@ defineProps<{
       <slot />
     </div>
     <p v-else class="column__empty">No cards yet</p>
+
+    <footer class="column__footer">
+      <slot name="footer" />
+    </footer>
   </section>
 </template>
 
@@ -43,6 +53,8 @@ defineProps<{
 }
 
 .column__title {
+  flex: 1;
+  min-width: 0;
   margin: 0;
   font-size: 0.875rem;
   font-weight: 600;
@@ -53,10 +65,6 @@ defineProps<{
 .column__count {
   font-size: 0.75rem;
   color: var(--color-text-muted);
-}
-
-.column__actions {
-  margin-left: auto;
 }
 
 .column__cards {
@@ -74,5 +82,9 @@ defineProps<{
   color: var(--color-text-muted);
   border: 1px dashed var(--color-border);
   border-radius: var(--radius);
+}
+
+.column__footer {
+  margin-top: var(--space-2);
 }
 </style>

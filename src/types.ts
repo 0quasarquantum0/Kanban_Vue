@@ -9,6 +9,9 @@ export interface Card {
   createdAt: string
 }
 
+/** The fields of a card that can be edited after creation. */
+export type CardPatch = Partial<Pick<Card, 'title' | 'description' | 'labels' | 'dueDate'>>
+
 export interface Column {
   id: ID
   title: string

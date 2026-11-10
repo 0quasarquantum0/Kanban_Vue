@@ -1,6 +1,6 @@
 # Architecture
 
-_Last updated: phase 1 (static board with components and props)._
+_Last updated: phase 2 (Pinia store and editing)._
 
 This file shows the project as it currently stands. It is updated at the end of every phase and only diagrams what exists.
 
@@ -9,7 +9,7 @@ This file shows the project as it currently stands. It is updated at the end of 
 ```mermaid
 flowchart TD
   html["index.html<br/>div#app"] --> main["src/main.ts<br/>createApp(App)"]
-  main -- "app.use()" --> pinia["Pinia<br/>(no stores yet)"]
+  main -- "app.use()" --> pinia["Pinia<br/>stores/kanban.ts"]
   main -- "app.use()" --> router["Vue Router<br/>src/router/index.ts"]
   main -- "mount('#app')" --> app["App.vue<br/>RouterView"]
   router -. "resolves current route" .-> app
@@ -17,16 +17,48 @@ flowchart TD
 
 ## Component tree
 
-Solid arrows are parent → child, labelled with the props passed down. Nothing emits events yet; the board is read-only.
+Solid arrows are parent → child, labelled with what is passed down (props, `v-model`) and what comes back up (events). Dotted arrows are store access. Only `BoardView` talks to the store; every other component is driven by props, models and events.
 
 ```mermaid
 flowchart TD
   app["App.vue<br/>RouterView"] --> home["views/HomeView.vue"]
-  home --> board["components/BoardView.vue<br/>state: ref&lt;KanbanState&gt; from createSeedState()"]
-  board -- "props: title, cardCount<br/>(v-for over columns)" --> column["components/KanbanColumn.vue<br/>slots: #actions, default<br/>empty state when cardCount is 0"]
-  board -- "props: card<br/>(v-for, rendered into the column's default slot)" --> card["components/KanbanCard.vue"]
-  column -. "default slot renders" .-> card
+  home --> board["components/BoardView.vue"]
+  store[("stores/kanban.ts<br/>useKanbanStore")]
+  board -. "reads getters, calls actions,<br/>v-model writes column.title" .-> store
+
+  board -- "v-model:title, prop cardCount<br/>(v-for over columns)" --> column["components/KanbanColumn.vue<br/>slots: #actions, default, #footer<br/>empty state when cardCount is 0"]
+  board -- "prop card<br/>emits update(patch), delete<br/>(into column's default slot)" --> card["components/KanbanCard.vue"]
+  board -- "props label, placeholder<br/>emits add(title)<br/>(column #footer, and once for 'Add column')" --> add["components/AddItemForm.vue"]
+
+  column -- "v-model (title)" --> inlineCol["components/InlineEdit.vue<br/>defineModel"]
+  card -- ":model-value + @update:model-value<br/>(title)" --> inlineCard["components/InlineEdit.vue"]
 ```
+
+## Store
+
+`stores/kanban.ts` is a Pinia setup store. State is one deep `ref<KanbanState>`, initialised from `createSeedState()` (not persisted yet, so a refresh resets it).
+
+```mermaid
+classDiagram
+  class useKanbanStore {
+    +state: Ref~KanbanState~
+    +firstBoard: Board | undefined
+    +columnsForBoard(boardId) Column[]
+    +cardsForColumn(columnId) Card[]
+    +addCard(columnId, title) Card
+    +updateCard(cardId, patch)
+    +deleteCard(cardId)
+    +addColumn(boardId, title) Column
+    +renameColumn(columnId, title)
+    +deleteColumn(columnId)
+    +moveCard(cardId, toColumnId, toIndex)
+  }
+```
+
+- `firstBoard`, `columnsForBoard` and `cardsForColumn` are `computed` getters; the last two return lookup functions.
+- `deleteColumn` also deletes the column's cards.
+- `moveCard` places the card at `toIndex` in the target column (clamped). No UI calls it yet; drag and drop arrives in phase 3.
+- Unit tests: `src/stores/__tests__/kanban.spec.ts` (`addCard`, `moveCard`, `deleteColumn`).
 
 ## Data model
 
@@ -60,6 +92,8 @@ erDiagram
   }
 ```
 
+`CardPatch` is the editable subset of a card (`title`, `description`, `labels`, `dueDate`), used by `updateCard` and `KanbanCard`'s `update` event.
+
 `src/seed.ts` exports `createSeedState()`, which builds one board with three columns (To do / Doing / Done) and six cards, with fresh IDs on each call.
 
 ## Routes
@@ -71,5 +105,5 @@ flowchart LR
 
 ## Not built yet
 
-- Pinia store, editing, and events from child components: phase 2
-- Drag and drop: phase 3
+- Drag and drop (the UI for `moveCard`): phase 3
+- Persistence: phase 5
