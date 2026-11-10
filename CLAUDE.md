@@ -13,6 +13,7 @@ Build in the phases below, in order. Each phase teaches specific Vue features.
 - **Skip JavaScript/TypeScript basics.** The developer knows them. Only explain what's Vue-specific.
 - **Write idiomatic Vue, not React-in-Vue.** Mutate reactive state directly. Use `v-model`, `computed`, directives, and slots rather than reproducing React patterns like lifting every piece of state or passing callbacks for everything.
 - **Prefer the platform and the Vue ecosystem over extra dependencies.** Ask before adding any npm package not listed in the Stack section.
+- **Keep the architecture diagram current.** `docs/architecture.md` holds Mermaid diagrams of the project as it stands (rendered natively by GitHub; no npm package needed). At the end of each phase, before committing, update it to match what was built: the component tree (with props, events, and slots), the data model, the store's shape, and the routes, as each comes into existence. Diagram only what exists, not what later phases plan. Note the phase it was last updated for at the top of the file. Future AI sessions should read this file first to get oriented.
 - Commit at the end of each phase with a message like `phase 3: drag and drop between columns`.
 
 ## Stack
@@ -197,6 +198,7 @@ src/
   - `FilterBar` updates the route query.
 - Make sure `npm run build` succeeds and `npm run preview` serves a working app.
 - Write a short `README.md` covering how to run the app and a summary of the Vue concepts each phase covered.
+- **Graphify (last step, ask first):** once everything else in this phase is clean, offer to run Graphify over the finished project to generate a knowledge graph that future AI sessions can use. It is deliberately left until the end: it suits larger codebases (such as a team project), and the graph would go stale if generated mid-build. It is an external tool, so confirm with the developer before installing or running it, and do not use it in earlier phases.
 - **Done when:** lint, type-check, tests, and build are all clean.
 
 ## Optional stretch goals (only if asked)
