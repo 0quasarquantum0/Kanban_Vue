@@ -1,11 +1,20 @@
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { defineStore } from 'pinia'
+import { useStorage } from '@vueuse/core'
 import { createSeedState } from '@/seed'
 import type { Board, Card, CardPatch, Column, ID, KanbanState } from '@/types'
+import { isKanbanState } from '@/validation'
+
+export const STORAGE_KEY = 'kanban-state'
 
 export const useKanbanStore = defineStore('kanban', () => {
   // --- state ---
-  const state = ref<KanbanState>(createSeedState())
+  // A ref backed by localStorage. If the key is missing (first run) the seed is used and
+  // saved; after that, every change to the ref, however deep, is written back as JSON.
+  const state = useStorage<KanbanState>(STORAGE_KEY, createSeedState)
+
+  // Stored data can be stale or hand-edited. Start over if it no longer fits the model.
+  if (!isKanbanState(state.value)) state.value = createSeedState()
 
   // --- getters ---
   // Until phase 6 adds routing, the app shows the first board.
@@ -97,6 +106,17 @@ export const useKanbanStore = defineStore('kanban', () => {
     to.cardIds.splice(index, 0, cardId)
   }
 
+  /** Replaces all state with `data` if it is a valid KanbanState. Returns whether it was. */
+  function importState(data: unknown): boolean {
+    if (!isKanbanState(data)) return false
+    state.value = data
+    return true
+  }
+
+  function resetToDemo(): void {
+    state.value = createSeedState()
+  }
+
   return {
     state,
     firstBoard,
@@ -109,5 +129,7 @@ export const useKanbanStore = defineStore('kanban', () => {
     renameColumn,
     deleteColumn,
     moveCard,
+    importState,
+    resetToDemo,
   }
 })

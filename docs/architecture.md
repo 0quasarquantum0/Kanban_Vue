@@ -1,6 +1,6 @@
 # Architecture
 
-_Last updated: phase 4 (transitions)._
+_Last updated: phase 5 (persistence)._
 
 This file shows the project as it currently stands. It is updated at the end of every phase and only diagrams what exists.
 
@@ -17,7 +17,7 @@ flowchart TD
 
 ## Component tree
 
-Solid arrows are parent → child, labelled with what is passed down (props, `v-model`) and what comes back up (events). Dotted arrows are store access. Only `BoardView` talks to the store; every other component is driven by props, models and events.
+Solid arrows are parent → child, labelled with what is passed down (props, `v-model`) and what comes back up (events). Dotted arrows are store access. `BoardView` and `BoardToolbar` talk to the store; every other component is driven by props, models and events.
 
 ```mermaid
 flowchart TD
@@ -29,6 +29,9 @@ flowchart TD
   board -- "v-model:title, prop cardCount<br/>(v-for over columns)" --> column["components/KanbanColumn.vue<br/>slots: #actions, default, #footer<br/>TransitionGroup around the default slot<br/>empty state when cardCount is 0"]
   board -- "prop card<br/>emits update(patch), delete<br/>(into column's default slot)" --> card["components/KanbanCard.vue"]
   board -- "props label, placeholder<br/>emits add(title)<br/>(column #footer, and once for 'Add column')" --> add["components/AddItemForm.vue"]
+
+  board --> toolbar["components/BoardToolbar.vue<br/>Export JSON, Import JSON, Reset to demo data<br/>(no props or events)"]
+  toolbar -. "reads state, calls importState / resetToDemo" .-> store
 
   dnd[["composables/useDragAndDrop.ts"]]
   board -. "calls once in setup;<br/>attaches its handlers to column and card roots" .-> dnd
@@ -85,12 +88,12 @@ stateDiagram-v2
 
 ## Store
 
-`stores/kanban.ts` is a Pinia setup store. State is one deep `ref<KanbanState>`, initialised from `createSeedState()` (not persisted yet, so a refresh resets it).
+`stores/kanban.ts` is a Pinia setup store. State is one deep ref of `KanbanState` created by VueUse's `useStorage`, so it is backed by `localStorage` (see Persistence below).
 
 ```mermaid
 classDiagram
   class useKanbanStore {
-    +state: Ref~KanbanState~
+    +state: RemovableRef~KanbanState~
     +firstBoard: Board | undefined
     +columnsForBoard(boardId) Column[]
     +cardsForColumn(columnId) Card[]
@@ -101,13 +104,40 @@ classDiagram
     +renameColumn(columnId, title)
     +deleteColumn(columnId)
     +moveCard(cardId, toColumnId, toIndex)
+    +importState(data) boolean
+    +resetToDemo()
   }
 ```
 
 - `firstBoard`, `columnsForBoard` and `cardsForColumn` are `computed` getters; the last two return lookup functions.
 - `deleteColumn` also deletes the column's cards.
 - `moveCard` places the card at `toIndex` in the target column (clamped). It is called by the drag-and-drop composable.
-- Unit tests: `src/stores/__tests__/kanban.spec.ts` (`addCard`, `moveCard`, `deleteColumn`).
+- `importState` replaces the whole state only if `isKanbanState(data)` passes, and returns whether it did.
+- Unit tests: `src/stores/__tests__/kanban.spec.ts` (`addCard`, `moveCard`, `deleteColumn`, persistence, `importState`, `resetToDemo`).
+
+## Persistence
+
+```mermaid
+flowchart LR
+  ls[("localStorage<br/>key: kanban-state")]
+  seed["seed.ts<br/>createSeedState()"]
+  valid{{"validation.ts<br/>isKanbanState()"}}
+  state["store.state<br/>useStorage ref"]
+  toolbar["BoardToolbar.vue"]
+  file[/"kanban-board.json"/]
+
+  ls -- "read once at store creation" --> state
+  seed -- "first run (key missing),<br/>invalid stored data, or reset" --> state
+  state -- "deep watch: any mutation<br/>is written back as JSON" --> ls
+  state -- "Export JSON" --> toolbar --> file
+  file -- "Import JSON" --> toolbar -- "importState(data)" --> valid
+  valid -- "valid: replace state" --> state
+  valid -. "invalid: error shown, nothing changes" .-> toolbar
+```
+
+- `src/validation.ts` checks the shape of every entity, that each is stored under its own id, and that every referenced column and card exists and is placed only once. Tests: `src/__tests__/validation.spec.ts`.
+- Reset asks for confirmation inline in the toolbar before calling `resetToDemo()`.
+- `vitest.config.ts` passes `--no-experimental-webstorage` so Node's own `localStorage` global doesn't hide jsdom's in tests.
 
 ## Data model
 
@@ -154,4 +184,4 @@ flowchart LR
 
 ## Not built yet
 
-- Persistence: phase 5
+- Multiple boards, routing and the card editor: phase 6

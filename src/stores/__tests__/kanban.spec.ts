@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { useKanbanStore } from '../kanban'
+import { createSeedState } from '@/seed'
+import { STORAGE_KEY, useKanbanStore } from '../kanban'
 
 /** A store with two fresh, empty columns on the seed board. */
 function setup() {
@@ -24,6 +26,7 @@ function setup() {
 
 describe('kanban store', () => {
   beforeEach(() => {
+    localStorage.clear()
     setActivePinia(createPinia())
   })
 
@@ -115,6 +118,57 @@ describe('kanban store', () => {
       expect(store.state.cards[one]).toBeUndefined()
       expect(store.state.cards[two]).toBeUndefined()
       expect(store.state.cards[kept]).toBeDefined()
+    })
+  })
+
+  describe('persistence', () => {
+    it('saves changes to localStorage and loads them in a fresh store', async () => {
+      const { a, add } = setup()
+      add(a.id, 'persisted')
+      await nextTick() // useStorage writes after Vue's next flush
+
+      // A new Pinia instance stands in for a page refresh.
+      setActivePinia(createPinia())
+      const reloaded = useKanbanStore()
+
+      expect(reloaded.cardsForColumn(a.id).map((card) => card.title)).toEqual(['persisted'])
+    })
+
+    it('falls back to the seed when stored data is invalid', () => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ boards: 'nope' }))
+      const store = useKanbanStore()
+
+      expect(store.firstBoard?.title).toBe('Vue Kanban')
+    })
+  })
+
+  describe('importState', () => {
+    it('replaces the state with valid data', () => {
+      const store = useKanbanStore()
+      const next = createSeedState()
+      const boardId = Object.keys(next.boards)[0]
+
+      expect(store.importState(next)).toBe(true)
+      expect(store.firstBoard?.id).toBe(boardId)
+    })
+
+    it('rejects invalid data and keeps the current state', () => {
+      const store = useKanbanStore()
+      const before = store.firstBoard?.id
+
+      expect(store.importState({ boards: {}, columns: {} })).toBe(false)
+      expect(store.firstBoard?.id).toBe(before)
+    })
+  })
+
+  describe('resetToDemo', () => {
+    it('discards changes and restores the seed', () => {
+      const { store, a } = setup()
+
+      store.resetToDemo()
+
+      expect(store.state.columns[a.id]).toBeUndefined()
+      expect(Object.keys(store.state.cards)).toHaveLength(6)
     })
   })
 })

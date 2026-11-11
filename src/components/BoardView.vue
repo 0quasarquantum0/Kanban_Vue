@@ -4,6 +4,7 @@ import { useDragAndDrop } from '@/composables/useDragAndDrop'
 import { useKanbanStore } from '@/stores/kanban'
 import type { Column } from '@/types'
 import AddItemForm from './AddItemForm.vue'
+import BoardToolbar from './BoardToolbar.vue'
 import KanbanCard from './KanbanCard.vue'
 import KanbanColumn from './KanbanColumn.vue'
 
@@ -32,7 +33,10 @@ function removeColumn(column: Column) {
 
 <template>
   <div v-if="board" class="board">
-    <h1 class="board__title">{{ board.title }}</h1>
+    <header class="board__header">
+      <h1>{{ board.title }}</h1>
+      <BoardToolbar />
+    </header>
 
     <div class="board__columns">
       <KanbanColumn
@@ -88,7 +92,10 @@ function removeColumn(column: Column) {
       </div>
     </div>
   </div>
-  <p v-else class="board__missing">No board found.</p>
+  <div v-else class="board__missing">
+    <p>No board found.</p>
+    <BoardToolbar />
+  </div>
 </template>
 
 <style scoped>
@@ -99,7 +106,12 @@ function removeColumn(column: Column) {
   padding: var(--space-4) var(--space-6);
 }
 
-.board__title {
+.board__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
   margin-bottom: var(--space-4);
 }
 
