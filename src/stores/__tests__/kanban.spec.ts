@@ -120,6 +120,16 @@ describe('kanban store', () => {
     })
   })
 
+  describe('labelsForBoard', () => {
+    it('lists each label on the board once, sorted', () => {
+      const { store, board, a, b, add } = setup()
+      store.updateCard(add(a.id, '1'), { labels: ['ui', 'bug'] })
+      store.updateCard(add(b.id, '2'), { labels: ['bug', 'api'] })
+
+      expect(store.labelsForBoard(board.id)).toEqual(['api', 'bug', 'ui'])
+    })
+  })
+
   describe('deleteBoard', () => {
     it('removes the board with its columns and cards, and leaves other boards alone', () => {
       const { store, board, a, b, add } = setup()

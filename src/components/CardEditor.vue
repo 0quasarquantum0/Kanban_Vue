@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useKanbanStore } from '@/stores/kanban'
 import type { ID } from '@/types'
 import BaseModal from './BaseModal.vue'
@@ -13,6 +13,7 @@ const props = defineProps<{
 
 const store = useKanbanStore()
 const router = useRouter()
+const route = useRoute()
 
 const isOpen = ref(true)
 
@@ -48,7 +49,7 @@ function remove() {
 
 // Runs after the modal's leave animation. Closing is a navigation back to the board route.
 function goToBoard() {
-  router.push({ name: 'board', params: { boardId: props.boardId } })
+  router.push({ name: 'board', params: { boardId: props.boardId }, query: route.query })
 }
 </script>
 
@@ -76,11 +77,11 @@ function goToBoard() {
       </label>
 
       <footer class="editor__actions">
-        <button class="editor__button editor__button--danger" type="button" @click="remove">
+        <button class="button button--danger-outline editor__delete" type="button" @click="remove">
           Delete card
         </button>
-        <button class="editor__button" type="button" @click="isOpen = false">Cancel</button>
-        <button class="editor__button editor__button--primary" type="submit">Save</button>
+        <button class="button" type="button" @click="isOpen = false">Cancel</button>
+        <button class="button button--primary" type="submit">Save</button>
       </footer>
     </form>
   </BaseModal>
@@ -135,34 +136,7 @@ function goToBoard() {
   margin-top: var(--space-2);
 }
 
-.editor__button {
-  padding: var(--space-1) var(--space-3);
-  font: inherit;
-  font-size: 0.875rem;
-  color: inherit;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  cursor: pointer;
-}
-
-.editor__button:hover {
-  background: var(--color-hover);
-}
-
-.editor__button--primary {
-  color: #fff;
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-}
-
-.editor__button--danger {
+.editor__delete {
   margin-right: auto;
-  color: var(--color-danger);
-}
-
-.editor__button--primary:hover {
-  background: var(--color-accent);
-  filter: brightness(0.92);
 }
 </style>

@@ -43,6 +43,65 @@ h1 {
   font-size: 1.5rem;
 }
 
+/* Shared button styles. Component-specific layout stays in each component's scoped CSS. */
+.button {
+  padding: var(--space-1) var(--space-3);
+  font: inherit;
+  font-size: 0.875rem;
+  color: inherit;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.button:hover {
+  background: var(--color-hover);
+}
+
+.button--primary,
+.button--primary:hover {
+  color: #fff;
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.button--danger,
+.button--danger:hover {
+  color: #fff;
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.button--primary:hover,
+.button--danger:hover {
+  filter: brightness(0.92);
+}
+
+.button--danger-outline {
+  color: var(--color-danger);
+}
+
+/* Small borderless buttons such as the × on cards, columns and the modal. */
+.icon-button {
+  padding: 0 var(--space-1);
+  font-size: 1rem;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  background: var(--color-hover);
+}
+
+.icon-button--danger:hover {
+  color: var(--color-danger);
+}
+
 /* Drag-and-drop state. Set from BoardView on the column and card root elements. */
 .is-drop-target {
   outline: 2px solid var(--color-accent);

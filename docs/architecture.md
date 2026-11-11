@@ -1,6 +1,6 @@
 # Architecture
 
-_Last updated: phase 6 (multiple boards and routing)._
+_Last updated: phase 7 (filtering and search)._
 
 This file shows the project as it currently stands. It is updated at the end of every phase and only diagrams what exists.
 
@@ -38,8 +38,12 @@ flowchart TD
   detail -. "reads state.boards[boardId]" .-> store
 
   board -. "getters, actions,<br/>v-model writes column.title" .-> store
-  board -- ":model-value + @update:model-value<br/>(board title → renameBoard)" --> inlineBoard["InlineEdit.vue"]
-  board -- "v-model:title, prop cardCount" --> column["components/KanbanColumn.vue<br/>slots: #actions, default, #footer<br/>TransitionGroup around the default slot"]
+  board -- ":title + @update:title<br/>(→ renameBoard)" --> header["components/BoardHeader.vue<br/>back link, title via InlineEdit"]
+  board -- "prop labels" --> filterBar["components/FilterBar.vue<br/>search input, label toggles, clear"]
+  filters[["composables/useBoardFilters.ts<br/>derived from route.query"]]
+  board -. "isFiltering, matches" .-> filters
+  filterBar -. "reads filters;<br/>setSearchText (debounced), toggleLabel, clearFilters" .-> filters
+  board -- "v-model:title,<br/>props cardCount, totalCount, emptyText" --> column["components/KanbanColumn.vue<br/>slots: #actions, default, #footer<br/>TransitionGroup around the default slot"]
   board -- "prop card, emits delete<br/>(into column's default slot)" --> card["components/KanbanCard.vue<br/>title is a RouterLink to the card route"]
   board -- "emits add(title)<br/>(column #footer, and 'Add column')" --> add["AddItemForm.vue"]
   column -- "v-model (title)" --> inlineCol["InlineEdit.vue<br/>defineModel"]
@@ -52,6 +56,33 @@ flowchart TD
   editor -. "updateCard, deleteCard" .-> store
   editor -. "on closed: router.push(board)" .-> detail
 ```
+
+## Filtering
+
+The URL query is the only place filter state lives: `?q=text` and `?label=bug&label=ui`. Filtered lists are never copied into state.
+
+```mermaid
+flowchart LR
+  url[("route.query<br/>q, label")]
+  filters["useBoardFilters()<br/>computed: searchText, activeLabels,<br/>isFiltering, matches"]
+  bar["FilterBar.vue<br/>draft ref for the input"]
+  board["BoardView.vue<br/>computed columns:<br/>{ column, cards.filter(matches), total }"]
+  store[("kanban store<br/>full card lists")]
+
+  url -- "computed" --> filters
+  filters --> bar
+  filters --> board
+  store --> board
+  bar -- "watchDebounced(draft, 300ms)<br/>→ router.replace" --> url
+  bar -- "label click, Clear<br/>→ router.replace" --> url
+  url -. "watch(searchText): back/forward or Clear<br/>resets the input" .-> bar
+```
+
+- Text matches title or description (case-insensitive). With several labels active, a card needs any one of them.
+- While `isFiltering`, cards render with `draggable="false"` and `FilterBar` explains why.
+- A column shows "N of M" and, if nothing matches, "No matching cards".
+- `KanbanCard`'s link and `CardEditor`'s close navigation both carry `route.query`, so filters survive opening a card.
+- `store.labelsForBoard(boardId)` supplies the label list.
 
 ## Drag and drop
 
@@ -76,7 +107,7 @@ sequenceDiagram
 
 - Reactive state: `draggingCardId`, `overColumnId`, `overIndex` (counted among the column's cards without the dragged one, which is the final index `moveCard` expects).
 - `dropPosition(columnId, cardIds, cardId)` returns `'before' | 'after' | null`; `BoardView` binds it to `data-drop` on each card.
-- Visual state is global CSS in `src/assets/main.css`: `.is-dragging`, `.is-drop-target`, and the `[data-drop]` indicator line.
+- Visual state is global CSS in `src/assets/main.css`: `.is-dragging`, `.is-drop-target`, and the `[data-drop]` indicator line. The shared `.button` and `.icon-button` classes live there too.
 
 ## Transitions
 
@@ -109,6 +140,7 @@ classDiagram
     +boardList: Board[]
     +columnsForBoard(boardId) Column[]
     +cardsForColumn(columnId) Card[]
+    +labelsForBoard(boardId) string[]
     +addBoard(title) Board
     +renameBoard(boardId, title)
     +deleteBoard(boardId)
@@ -124,7 +156,7 @@ classDiagram
   }
 ```
 
-- `boardList`, `columnsForBoard` and `cardsForColumn` are `computed` getters; the last two return lookup functions.
+- `boardList`, `columnsForBoard`, `cardsForColumn` and `labelsForBoard` are `computed` getters; the last three return lookup functions.
 - `deleteColumn` also deletes the column's cards; `deleteBoard` deletes its columns the same way.
 - `moveCard` places the card at `toIndex` in the target column (clamped). It is called by the drag-and-drop composable.
 - `importState` replaces the whole state only if `isKanbanState(data)` passes, and returns whether it did.
@@ -216,5 +248,4 @@ flowchart TD
 
 ## Not built yet
 
-- Filtering and search: phase 7
 - Modal focus management, themes, keyboard shortcuts: phase 8

@@ -39,7 +39,7 @@ function removeBoard(board: Board) {
             <InlineEdit v-model="board.title" label="Board title" />
           </h2>
           <button
-            class="boards__delete"
+            class="icon-button icon-button--danger"
             type="button"
             :aria-label="`Delete board: ${board.title}`"
             @click="removeBoard(board)"
@@ -114,22 +114,6 @@ function removeBoard(board: Board) {
   min-width: 0;
   margin: 0;
   font-size: 1.0625rem;
-}
-
-.boards__delete {
-  padding: 0 var(--space-1);
-  font-size: 1rem;
-  line-height: 1.5;
-  color: var(--color-text-muted);
-  background: none;
-  border: none;
-  border-radius: var(--radius);
-  cursor: pointer;
-}
-
-.boards__delete:hover {
-  color: var(--color-danger);
-  background: var(--color-hover);
 }
 
 .boards__summary {

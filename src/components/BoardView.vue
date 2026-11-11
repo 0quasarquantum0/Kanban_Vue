@@ -1,18 +1,30 @@
 <script setup lang="ts">
-import { RouterLink } from 'vue-router'
+import { computed } from 'vue'
+import { useBoardFilters } from '@/composables/useBoardFilters'
 import { useDragAndDrop } from '@/composables/useDragAndDrop'
 import { useKanbanStore } from '@/stores/kanban'
 import type { Board, Column } from '@/types'
 import AddItemForm from './AddItemForm.vue'
-import InlineEdit from './InlineEdit.vue'
+import BoardHeader from './BoardHeader.vue'
+import FilterBar from './FilterBar.vue'
 import KanbanCard from './KanbanCard.vue'
 import KanbanColumn from './KanbanColumn.vue'
 
-defineProps<{
+const props = defineProps<{
   board: Board
 }>()
 
 const store = useKanbanStore()
+const { isFiltering, matches } = useBoardFilters()
+
+// The filtered view is derived, never stored: it recomputes when the board, its cards or
+// the filters change, and the store keeps the full lists.
+const columns = computed(() =>
+  store.columnsForBoard(props.board.id).map((column) => {
+    const cards = store.cardsForColumn(column.id)
+    return { column, cards: cards.filter(matches.value), total: cards.length }
+  }),
+)
 
 // Refs are destructured to the top level so the template unwraps them automatically.
 const {
@@ -35,23 +47,18 @@ function removeColumn(column: Column) {
 
 <template>
   <div class="board">
-    <header class="board__header">
-      <RouterLink class="board__back" :to="{ name: 'boards' }">← All boards</RouterLink>
-      <h1 class="board__title">
-        <InlineEdit
-          :model-value="board.title"
-          label="Board title"
-          @update:model-value="store.renameBoard(board.id, $event)"
-        />
-      </h1>
-    </header>
+    <!-- `board` is a prop, so its title can't be v-modelled; this is v-model written out by hand. -->
+    <BoardHeader :title="board.title" @update:title="store.renameBoard(board.id, $event)" />
+    <FilterBar :labels="store.labelsForBoard(board.id)" />
 
     <div class="board__columns">
       <KanbanColumn
-        v-for="column in store.columnsForBoard(board.id)"
+        v-for="{ column, cards, total } in columns"
         :key="column.id"
         v-model:title="column.title"
-        :card-count="column.cardIds.length"
+        :card-count="cards.length"
+        :total-count="isFiltering ? total : undefined"
+        :empty-text="isFiltering && total > 0 ? 'No matching cards' : undefined"
         :class="{ 'is-drop-target': overColumnId === column.id }"
         @dragover.prevent="onDragOver($event, column.id)"
         @dragleave="onDragLeave($event, column.id)"
@@ -59,7 +66,7 @@ function removeColumn(column: Column) {
       >
         <template #actions>
           <button
-            class="board__column-action"
+            class="icon-button icon-button--danger"
             type="button"
             :aria-label="`Delete column: ${column.title}`"
             @click="removeColumn(column)"
@@ -69,10 +76,10 @@ function removeColumn(column: Column) {
         </template>
 
         <KanbanCard
-          v-for="card in store.cardsForColumn(column.id)"
+          v-for="card in cards"
           :key="card.id"
           :card="card"
-          draggable="true"
+          :draggable="!isFiltering"
           :data-card-id="card.id"
           :data-drop="dropPosition(column.id, column.cardIds, card.id)"
           :class="{ 'is-dragging': draggingCardId === card.id }"
@@ -109,27 +116,6 @@ function removeColumn(column: Column) {
   padding: var(--space-4) var(--space-6);
 }
 
-.board__header {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  margin-bottom: var(--space-4);
-}
-
-.board__back {
-  font-size: 0.875rem;
-  color: var(--color-text-muted);
-  text-decoration: none;
-}
-
-.board__back:hover {
-  color: var(--color-accent);
-}
-
-.board__title {
-  align-self: stretch;
-}
-
 .board__columns {
   display: flex;
   flex: 1;
@@ -138,22 +124,6 @@ function removeColumn(column: Column) {
   min-height: 0;
   /* Tall columns scroll the whole board, not themselves. */
   overflow: auto;
-}
-
-.board__column-action {
-  padding: 0 var(--space-2);
-  font-size: 1rem;
-  line-height: 1.5;
-  color: var(--color-text-muted);
-  background: none;
-  border: none;
-  border-radius: var(--radius);
-  cursor: pointer;
-}
-
-.board__column-action:hover {
-  color: var(--color-danger);
-  background: var(--color-hover);
 }
 
 .board__add-column {

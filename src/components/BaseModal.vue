@@ -31,7 +31,12 @@ onKeyStroke('Escape', () => {
         <div class="modal__dialog" role="dialog" aria-modal="true" :aria-labelledby="titleId">
           <header class="modal__header">
             <h2 :id="titleId" class="modal__title">{{ title }}</h2>
-            <button class="modal__close" type="button" aria-label="Close" @click="open = false">
+            <button
+              class="icon-button modal__close"
+              type="button"
+              aria-label="Close"
+              @click="open = false"
+            >
               ×
             </button>
           </header>
@@ -77,18 +82,7 @@ onKeyStroke('Escape', () => {
 }
 
 .modal__close {
-  padding: 0 var(--space-2);
   font-size: 1.25rem;
-  line-height: 1.4;
-  color: var(--color-text-muted);
-  background: none;
-  border: none;
-  border-radius: var(--radius);
-  cursor: pointer;
-}
-
-.modal__close:hover {
-  background: var(--color-hover);
 }
 
 .modal-enter-active,

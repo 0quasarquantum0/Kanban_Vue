@@ -47,18 +47,14 @@ function reset() {
   <div class="toolbar">
     <div v-if="isConfirmingReset" class="toolbar__group" role="group" aria-label="Confirm reset">
       <span class="toolbar__question">Replace everything with the demo data?</span>
-      <button class="toolbar__button toolbar__button--danger" type="button" @click="reset">
-        Yes, reset
-      </button>
-      <button class="toolbar__button" type="button" @click="isConfirmingReset = false">
-        Cancel
-      </button>
+      <button class="button button--danger" type="button" @click="reset">Yes, reset</button>
+      <button class="button" type="button" @click="isConfirmingReset = false">Cancel</button>
     </div>
 
     <div v-else class="toolbar__group">
-      <button class="toolbar__button" type="button" @click="exportJson">Export JSON</button>
-      <button class="toolbar__button" type="button" @click="fileInput?.click()">Import JSON</button>
-      <button class="toolbar__button" type="button" @click="isConfirmingReset = true">
+      <button class="button" type="button" @click="exportJson">Export JSON</button>
+      <button class="button" type="button" @click="fileInput?.click()">Import JSON</button>
+      <button class="button" type="button" @click="isConfirmingReset = true">
         Reset to demo data
       </button>
       <input
@@ -91,32 +87,6 @@ function reset() {
 
 .toolbar__question {
   font-size: 0.875rem;
-}
-
-.toolbar__button {
-  padding: var(--space-1) var(--space-3);
-  font: inherit;
-  font-size: 0.875rem;
-  color: inherit;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  cursor: pointer;
-}
-
-.toolbar__button:hover {
-  background: var(--color-hover);
-}
-
-.toolbar__button--danger {
-  color: #fff;
-  background: var(--color-danger);
-  border-color: var(--color-danger);
-}
-
-.toolbar__button--danger:hover {
-  background: var(--color-danger);
-  filter: brightness(0.9);
 }
 
 .toolbar__error {

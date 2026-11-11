@@ -30,6 +30,14 @@ export const useKanbanStore = defineStore('kanban', () => {
     return column ? column.cardIds.flatMap((id) => state.value.cards[id] ?? []) : []
   })
 
+  /** Every distinct label used on the board, sorted. */
+  const labelsForBoard = computed(() => (boardId: ID): string[] => {
+    const cards = columnsForBoard
+      .value(boardId)
+      .flatMap((column) => cardsForColumn.value(column.id))
+    return [...new Set(cards.flatMap((card) => card.labels))].sort()
+  })
+
   function columnContaining(cardId: ID): Column | undefined {
     return Object.values(state.value.columns).find((column) => column.cardIds.includes(cardId))
   }
@@ -143,6 +151,7 @@ export const useKanbanStore = defineStore('kanban', () => {
     boardList,
     columnsForBoard,
     cardsForColumn,
+    labelsForBoard,
     addBoard,
     renameBoard,
     deleteBoard,

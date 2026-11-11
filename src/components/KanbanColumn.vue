@@ -4,9 +4,16 @@ import InlineEdit from './InlineEdit.vue'
 // A named model: the parent binds it with v-model:title.
 const title = defineModel<string>('title', { required: true })
 
-defineProps<{
-  cardCount: number
-}>()
+withDefaults(
+  defineProps<{
+    /** Cards currently shown. */
+    cardCount: number
+    /** Cards in the column, when some are hidden by a filter. */
+    totalCount?: number
+    emptyText?: string
+  }>(),
+  { totalCount: undefined, emptyText: 'No cards yet' },
+)
 </script>
 
 <template>
@@ -15,7 +22,9 @@ defineProps<{
       <h2 class="column__title">
         <InlineEdit v-model="title" label="Column title" />
       </h2>
-      <span class="column__count">{{ cardCount }}</span>
+      <span class="column__count">
+        {{ cardCount }}<template v-if="totalCount !== undefined"> of {{ totalCount }}</template>
+      </span>
       <div class="column__actions">
         <!-- Named slot: the parent decides which buttons appear here. -->
         <slot name="actions" />
@@ -29,7 +38,7 @@ defineProps<{
     -->
     <TransitionGroup tag="div" class="column__cards" name="card-list">
       <slot />
-      <p v-if="cardCount === 0" key="empty" class="column__empty">No cards yet</p>
+      <p v-if="cardCount === 0" key="empty" class="column__empty">{{ emptyText }}</p>
     </TransitionGroup>
 
     <footer class="column__footer">

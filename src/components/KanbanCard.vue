@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import type { Card } from '@/types'
 
 defineProps<{
@@ -9,6 +9,8 @@ defineProps<{
 const emit = defineEmits<{
   delete: []
 }>()
+
+const route = useRoute()
 
 // Date-only ISO strings parse as UTC midnight, so format in UTC to avoid an off-by-one day.
 const dateFormat = new Intl.DateTimeFormat(undefined, {
@@ -28,19 +30,20 @@ function formatDate(iso: string): string {
       <h3 class="card__title">
         <!--
           Opens the editor route. `boardId` isn't passed: for a named route, the router
-          reuses matching params from the current location.
+          reuses matching params from the current location. The query is passed along so
+          the board's filters stay in the URL.
           draggable="false" stops the browser dragging the link instead of the card.
         -->
         <RouterLink
           class="card__link"
-          :to="{ name: 'card', params: { cardId: card.id } }"
+          :to="{ name: 'card', params: { cardId: card.id }, query: route.query }"
           draggable="false"
         >
           {{ card.title }}
         </RouterLink>
       </h3>
       <button
-        class="card__delete"
+        class="icon-button icon-button--danger"
         type="button"
         :aria-label="`Delete card: ${card.title}`"
         @click="emit('delete')"
@@ -69,6 +72,9 @@ function formatDate(iso: string): string {
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-card);
+}
+
+.card[draggable='true'] {
   cursor: grab;
 }
 
@@ -76,22 +82,6 @@ function formatDate(iso: string): string {
   display: flex;
   align-items: flex-start;
   gap: var(--space-1);
-}
-
-.card__delete {
-  padding: 0 var(--space-1);
-  font-size: 1rem;
-  line-height: 1.4;
-  color: var(--color-text-muted);
-  background: none;
-  border: none;
-  border-radius: var(--radius);
-  cursor: pointer;
-}
-
-.card__delete:hover {
-  color: var(--color-danger);
-  background: var(--color-hover);
 }
 
 .card__title {
