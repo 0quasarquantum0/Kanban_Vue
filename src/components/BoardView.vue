@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { storeToRefs } from 'pinia'
+import { RouterLink } from 'vue-router'
 import { useDragAndDrop } from '@/composables/useDragAndDrop'
 import { useKanbanStore } from '@/stores/kanban'
-import type { Column } from '@/types'
+import type { Board, Column } from '@/types'
 import AddItemForm from './AddItemForm.vue'
-import BoardToolbar from './BoardToolbar.vue'
+import InlineEdit from './InlineEdit.vue'
 import KanbanCard from './KanbanCard.vue'
 import KanbanColumn from './KanbanColumn.vue'
 
+defineProps<{
+  board: Board
+}>()
+
 const store = useKanbanStore()
-// storeToRefs keeps `board` reactive after destructuring. Actions are called on `store` directly.
-const { firstBoard: board } = storeToRefs(store)
 
 // Refs are destructured to the top level so the template unwraps them automatically.
 const {
@@ -32,10 +34,16 @@ function removeColumn(column: Column) {
 </script>
 
 <template>
-  <div v-if="board" class="board">
+  <div class="board">
     <header class="board__header">
-      <h1>{{ board.title }}</h1>
-      <BoardToolbar />
+      <RouterLink class="board__back" :to="{ name: 'boards' }">← All boards</RouterLink>
+      <h1 class="board__title">
+        <InlineEdit
+          :model-value="board.title"
+          label="Board title"
+          @update:model-value="store.renameBoard(board.id, $event)"
+        />
+      </h1>
     </header>
 
     <div class="board__columns">
@@ -70,7 +78,6 @@ function removeColumn(column: Column) {
           :class="{ 'is-dragging': draggingCardId === card.id }"
           @dragstart="onDragStart($event, card.id)"
           @dragend="onDragEnd"
-          @update="store.updateCard(card.id, $event)"
           @delete="store.deleteCard(card.id)"
         />
 
@@ -92,10 +99,6 @@ function removeColumn(column: Column) {
       </div>
     </div>
   </div>
-  <div v-else class="board__missing">
-    <p>No board found.</p>
-    <BoardToolbar />
-  </div>
 </template>
 
 <style scoped>
@@ -108,11 +111,23 @@ function removeColumn(column: Column) {
 
 .board__header {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2) var(--space-4);
+  flex-direction: column;
+  align-items: flex-start;
   margin-bottom: var(--space-4);
+}
+
+.board__back {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  text-decoration: none;
+}
+
+.board__back:hover {
+  color: var(--color-accent);
+}
+
+.board__title {
+  align-self: stretch;
 }
 
 .board__columns {
@@ -146,9 +161,5 @@ function removeColumn(column: Column) {
   padding: var(--space-2);
   background: var(--color-column);
   border-radius: var(--radius);
-}
-
-.board__missing {
-  padding: var(--space-6);
 }
 </style>

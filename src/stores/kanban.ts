@@ -17,8 +17,7 @@ export const useKanbanStore = defineStore('kanban', () => {
   if (!isKanbanState(state.value)) state.value = createSeedState()
 
   // --- getters ---
-  // Until phase 6 adds routing, the app shows the first board.
-  const firstBoard = computed<Board | undefined>(() => Object.values(state.value.boards)[0])
+  const boardList = computed<Board[]>(() => Object.values(state.value.boards))
 
   // A computed can't take arguments, so these return a lookup function instead.
   const columnsForBoard = computed(() => (boardId: ID): Column[] => {
@@ -36,6 +35,28 @@ export const useKanbanStore = defineStore('kanban', () => {
   }
 
   // --- actions ---
+  function addBoard(title: string): Board {
+    const board: Board = { id: crypto.randomUUID(), title, columnIds: [] }
+    state.value.boards[board.id] = board
+    return board
+  }
+
+  function renameBoard(boardId: ID, title: string): void {
+    const board = state.value.boards[boardId]
+    if (board) board.title = title
+  }
+
+  /** Deletes the board, its columns, and their cards. */
+  function deleteBoard(boardId: ID): void {
+    const board = state.value.boards[boardId]
+    if (!board) return
+
+    // Copy first: deleteColumn splices this same array.
+    const columnIds = board.columnIds.slice()
+    for (const columnId of columnIds) deleteColumn(columnId)
+    delete state.value.boards[boardId]
+  }
+
   function addCard(columnId: ID, title: string): Card | undefined {
     const column = state.value.columns[columnId]
     if (!column) return undefined
@@ -119,9 +140,12 @@ export const useKanbanStore = defineStore('kanban', () => {
 
   return {
     state,
-    firstBoard,
+    boardList,
     columnsForBoard,
     cardsForColumn,
+    addBoard,
+    renameBoard,
+    deleteBoard,
     addCard,
     updateCard,
     deleteCard,

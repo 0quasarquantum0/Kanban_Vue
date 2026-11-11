@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import type { Card, CardPatch } from '@/types'
-import InlineEdit from './InlineEdit.vue'
+import { RouterLink } from 'vue-router'
+import type { Card } from '@/types'
 
 defineProps<{
   card: Card
 }>()
 
 const emit = defineEmits<{
-  update: [patch: CardPatch]
   delete: []
 }>()
 
@@ -27,12 +26,18 @@ function formatDate(iso: string): string {
   <article class="card">
     <header class="card__header">
       <h3 class="card__title">
-        <!-- The card is a prop, so we can't v-model it. This is v-model written out by hand. -->
-        <InlineEdit
-          :model-value="card.title"
-          label="Card title"
-          @update:model-value="emit('update', { title: $event })"
-        />
+        <!--
+          Opens the editor route. `boardId` isn't passed: for a named route, the router
+          reuses matching params from the current location.
+          draggable="false" stops the browser dragging the link instead of the card.
+        -->
+        <RouterLink
+          class="card__link"
+          :to="{ name: 'card', params: { cardId: card.id } }"
+          draggable="false"
+        >
+          {{ card.title }}
+        </RouterLink>
       </h3>
       <button
         class="card__delete"
@@ -98,8 +103,18 @@ function formatDate(iso: string): string {
   overflow-wrap: anywhere;
 }
 
+.card__link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.card__link:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
 .card__description {
-  margin: var(--space-1) var(--space-1) 0;
+  margin: var(--space-1) 0 0;
   font-size: 0.8125rem;
   color: var(--color-text-muted);
   overflow-wrap: anywhere;

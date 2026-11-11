@@ -20,12 +20,17 @@ describe('isKanbanState', () => {
     expect(isKanbanState({ boards: {}, columns: {}, cards: {} })).toBe(true)
   })
 
-  it.each([null, 'text', 42, [], {}, { boards: {}, columns: {} }, { boards: [], columns: {}, cards: {} }])(
-    'rejects %j',
-    (value) => {
-      expect(isKanbanState(value)).toBe(false)
-    },
-  )
+  it.each([
+    null,
+    'text',
+    42,
+    [],
+    {},
+    { boards: {}, columns: {} },
+    { boards: [], columns: {}, cards: {} },
+  ])('rejects %j', (value) => {
+    expect(isKanbanState(value)).toBe(false)
+  })
 
   it('rejects a card with a wrongly typed field', () => {
     const state = seed()

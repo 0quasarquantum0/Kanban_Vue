@@ -1,6 +1,6 @@
 # Architecture
 
-_Last updated: phase 5 (persistence)._
+_Last updated: phase 6 (multiple boards and routing)._
 
 This file shows the project as it currently stands. It is updated at the end of every phase and only diagrams what exists.
 
@@ -17,28 +17,40 @@ flowchart TD
 
 ## Component tree
 
-Solid arrows are parent → child, labelled with what is passed down (props, `v-model`) and what comes back up (events). Dotted arrows are store access. `BoardView` and `BoardToolbar` talk to the store; every other component is driven by props, models and events.
+Solid arrows are parent → child, labelled with what is passed down (props, `v-model`) and what comes back up (events). Dotted arrows are store or router access. The views, `BoardView`, `BoardToolbar` and `CardEditor` talk to the store; the rest are driven by props, models and events.
 
 ```mermaid
 flowchart TD
-  app["App.vue<br/>RouterView"] --> home["views/HomeView.vue"]
-  home --> board["components/BoardView.vue"]
+  app["App.vue<br/>RouterView"]
   store[("stores/kanban.ts<br/>useKanbanStore")]
-  board -. "reads getters, calls actions,<br/>v-model writes column.title" .-> store
 
-  board -- "v-model:title, prop cardCount<br/>(v-for over columns)" --> column["components/KanbanColumn.vue<br/>slots: #actions, default, #footer<br/>TransitionGroup around the default slot<br/>empty state when cardCount is 0"]
-  board -- "prop card<br/>emits update(patch), delete<br/>(into column's default slot)" --> card["components/KanbanCard.vue"]
-  board -- "props label, placeholder<br/>emits add(title)<br/>(column #footer, and once for 'Add column')" --> add["components/AddItemForm.vue"]
+  app -- "route /" --> list["views/BoardsListView.vue<br/>create, rename, delete boards"]
+  app -- "route /boards/:boardId<br/>prop boardId" --> detail["views/BoardDetailView.vue<br/>nested RouterView (keyed by path)"]
 
-  board --> toolbar["components/BoardToolbar.vue<br/>Export JSON, Import JSON, Reset to demo data<br/>(no props or events)"]
-  toolbar -. "reads state, calls importState / resetToDemo" .-> store
+  list -. "boardList, addBoard, deleteBoard,<br/>v-model writes board.title" .-> store
+  list --> toolbar["components/BoardToolbar.vue<br/>Export JSON, Import JSON, Reset"]
+  list -- "v-model (board title)" --> inlineList["InlineEdit.vue"]
+  list -- "emits add(title)" --> addBoard["AddItemForm.vue"]
+  toolbar -. "reads state, importState, resetToDemo" .-> store
+
+  detail -- "prop board" --> board["components/BoardView.vue"]
+  detail -- "child route cards/:cardId<br/>props boardId, cardId" --> editor["components/CardEditor.vue<br/>draft form: title, description, labels, due date"]
+  detail -. "reads state.boards[boardId]" .-> store
+
+  board -. "getters, actions,<br/>v-model writes column.title" .-> store
+  board -- ":model-value + @update:model-value<br/>(board title → renameBoard)" --> inlineBoard["InlineEdit.vue"]
+  board -- "v-model:title, prop cardCount" --> column["components/KanbanColumn.vue<br/>slots: #actions, default, #footer<br/>TransitionGroup around the default slot"]
+  board -- "prop card, emits delete<br/>(into column's default slot)" --> card["components/KanbanCard.vue<br/>title is a RouterLink to the card route"]
+  board -- "emits add(title)<br/>(column #footer, and 'Add column')" --> add["AddItemForm.vue"]
+  column -- "v-model (title)" --> inlineCol["InlineEdit.vue<br/>defineModel"]
 
   dnd[["composables/useDragAndDrop.ts"]]
-  board -. "calls once in setup;<br/>attaches its handlers to column and card roots" .-> dnd
+  board -. "calls once in setup" .-> dnd
   dnd -. "onDrop → moveCard" .-> store
 
-  column -- "v-model (title)" --> inlineCol["components/InlineEdit.vue<br/>defineModel"]
-  card -- ":model-value + @update:model-value<br/>(title)" --> inlineCard["components/InlineEdit.vue"]
+  editor -- "v-model:open, prop title<br/>emits closed" --> modal["components/BaseModal.vue<br/>Teleport to body + Transition<br/>closes on Esc, backdrop, ×"]
+  editor -. "updateCard, deleteCard" .-> store
+  editor -. "on closed: router.push(board)" .-> detail
 ```
 
 ## Drag and drop
@@ -94,9 +106,12 @@ stateDiagram-v2
 classDiagram
   class useKanbanStore {
     +state: RemovableRef~KanbanState~
-    +firstBoard: Board | undefined
+    +boardList: Board[]
     +columnsForBoard(boardId) Column[]
     +cardsForColumn(columnId) Card[]
+    +addBoard(title) Board
+    +renameBoard(boardId, title)
+    +deleteBoard(boardId)
     +addCard(columnId, title) Card
     +updateCard(cardId, patch)
     +deleteCard(cardId)
@@ -109,11 +124,11 @@ classDiagram
   }
 ```
 
-- `firstBoard`, `columnsForBoard` and `cardsForColumn` are `computed` getters; the last two return lookup functions.
-- `deleteColumn` also deletes the column's cards.
+- `boardList`, `columnsForBoard` and `cardsForColumn` are `computed` getters; the last two return lookup functions.
+- `deleteColumn` also deletes the column's cards; `deleteBoard` deletes its columns the same way.
 - `moveCard` places the card at `toIndex` in the target column (clamped). It is called by the drag-and-drop composable.
 - `importState` replaces the whole state only if `isKanbanState(data)` passes, and returns whether it did.
-- Unit tests: `src/stores/__tests__/kanban.spec.ts` (`addCard`, `moveCard`, `deleteColumn`, persistence, `importState`, `resetToDemo`).
+- Unit tests: `src/stores/__tests__/kanban.spec.ts` (`addCard`, `moveCard`, `deleteColumn`, `deleteBoard`, persistence, `importState`, `resetToDemo`).
 
 ## Persistence
 
@@ -171,17 +186,35 @@ erDiagram
   }
 ```
 
-`CardPatch` is the editable subset of a card (`title`, `description`, `labels`, `dueDate`), used by `updateCard` and `KanbanCard`'s `update` event.
+`CardPatch` is the editable subset of a card (`title`, `description`, `labels`, `dueDate`), used by `updateCard`, which `CardEditor` calls on Save.
 
 `src/seed.ts` exports `createSeedState()`, which builds one board with three columns (To do / Doing / Done) and six cards, with fresh IDs on each call.
 
 ## Routes
 
+Defined in `src/router/index.ts` (history mode, no file-based routing).
+
 ```mermaid
-flowchart LR
-  root["/"] --> home["HomeView → BoardView"]
+flowchart TD
+  any["any other path"] -- "redirect" --> boards
+  boards["/ (name: boards)<br/>BoardsListView"]
+  board["/boards/:boardId (name: board)<br/>BoardDetailView"]
+  card["/boards/:boardId/cards/:cardId (name: card)<br/>CardEditor, rendered in BoardDetailView's RouterView"]
+
+  boards -- "Open board →" --> board
+  board -- "← All boards" --> boards
+  board -- "click a card title" --> card
+  card -- "Save, Cancel, Delete, Esc, backdrop<br/>(after the modal's leave animation)" --> board
+
+  board -. "beforeEnter requireBoard:<br/>unknown board → /" .-> boards
+  card -. "beforeEnter requireCard:<br/>card not on this board → board" .-> board
 ```
+
+- Params reach components as props (`props` on the route), so `BoardDetailView` and `CardEditor` don't read `route.params`.
+- `beforeEnter` only runs when the route is entered, so `BoardDetailView` also renders a "no longer exists" message if its board disappears later.
+- `KanbanCard` links to `{ name: 'card', params: { cardId } }`; the router reuses `boardId` from the current location.
 
 ## Not built yet
 
-- Multiple boards, routing and the card editor: phase 6
+- Filtering and search: phase 7
+- Modal focus management, themes, keyboard shortcuts: phase 8

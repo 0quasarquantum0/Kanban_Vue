@@ -4,11 +4,10 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createSeedState } from '@/seed'
 import { STORAGE_KEY, useKanbanStore } from '../kanban'
 
-/** A store with two fresh, empty columns on the seed board. */
+/** A store with a new board holding two empty columns. */
 function setup() {
   const store = useKanbanStore()
-  const board = store.firstBoard
-  if (!board) throw new Error('seed has no board')
+  const board = store.addBoard('Test board')
 
   const a = store.addColumn(board.id, 'A')
   const b = store.addColumn(board.id, 'B')
@@ -121,6 +120,25 @@ describe('kanban store', () => {
     })
   })
 
+  describe('deleteBoard', () => {
+    it('removes the board with its columns and cards, and leaves other boards alone', () => {
+      const { store, board, a, b, add } = setup()
+      const card = add(a.id, '1')
+      const seedBoardIds = store.boardList
+        .filter((item) => item.id !== board.id)
+        .map((item) => item.id)
+      const seedCardCount = Object.keys(store.state.cards).length - 1
+
+      store.deleteBoard(board.id)
+
+      expect(store.boardList.map((item) => item.id)).toEqual(seedBoardIds)
+      expect(store.state.columns[a.id]).toBeUndefined()
+      expect(store.state.columns[b.id]).toBeUndefined()
+      expect(store.state.cards[card]).toBeUndefined()
+      expect(Object.keys(store.state.cards)).toHaveLength(seedCardCount)
+    })
+  })
+
   describe('persistence', () => {
     it('saves changes to localStorage and loads them in a fresh store', async () => {
       const { a, add } = setup()
@@ -138,7 +156,7 @@ describe('kanban store', () => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ boards: 'nope' }))
       const store = useKanbanStore()
 
-      expect(store.firstBoard?.title).toBe('Vue Kanban')
+      expect(store.boardList.map((board) => board.title)).toEqual(['Vue Kanban'])
     })
   })
 
@@ -149,15 +167,15 @@ describe('kanban store', () => {
       const boardId = Object.keys(next.boards)[0]
 
       expect(store.importState(next)).toBe(true)
-      expect(store.firstBoard?.id).toBe(boardId)
+      expect(store.boardList.map((board) => board.id)).toEqual([boardId])
     })
 
     it('rejects invalid data and keeps the current state', () => {
       const store = useKanbanStore()
-      const before = store.firstBoard?.id
+      const before = store.boardList.map((board) => board.id)
 
       expect(store.importState({ boards: {}, columns: {} })).toBe(false)
-      expect(store.firstBoard?.id).toBe(before)
+      expect(store.boardList.map((board) => board.id)).toEqual(before)
     })
   })
 
