@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router'
 import AddItemForm from '@/components/AddItemForm.vue'
 import BoardToolbar from '@/components/BoardToolbar.vue'
 import InlineEdit from '@/components/InlineEdit.vue'
+import ThemeToggle from '@/components/ThemeToggle.vue'
 import { useKanbanStore } from '@/stores/kanban'
 import type { Board } from '@/types'
 
@@ -28,7 +29,8 @@ function removeBoard(board: Board) {
 <template>
   <main class="boards">
     <header class="boards__header">
-      <h1>Kanban</h1>
+      <h1 class="boards__heading">Kanban</h1>
+      <ThemeToggle />
       <BoardToolbar />
     </header>
 
@@ -73,9 +75,12 @@ function removeBoard(board: Board) {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2) var(--space-4);
+  gap: var(--space-2);
   margin-bottom: var(--space-4);
+}
+
+.boards__heading {
+  margin-right: auto;
 }
 
 .boards__list {

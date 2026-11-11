@@ -1,6 +1,6 @@
 # Architecture
 
-_Last updated: phase 7 (filtering and search)._
+_Last updated: phase 8 (polish: themes, shortcuts, accessibility)._
 
 This file shows the project as it currently stands. It is updated at the end of every phase and only diagrams what exists.
 
@@ -17,17 +17,18 @@ flowchart TD
 
 ## Component tree
 
-Solid arrows are parent → child, labelled with what is passed down (props, `v-model`) and what comes back up (events). Dotted arrows are store or router access. The views, `BoardView`, `BoardToolbar` and `CardEditor` talk to the store; the rest are driven by props, models and events.
+Solid arrows are parent → child, labelled with what is passed down (props, `v-model`) and what comes back up (events). Dotted arrows are store or router access. The views, `BoardView`, `BoardToolbar`, `CardEditor` and `CardMoveMenu` talk to the store; the rest are driven by props, models and events.
 
 ```mermaid
 flowchart TD
-  app["App.vue<br/>RouterView"]
+  app["App.vue<br/>RouterView<br/>provideTheme()"]
   store[("stores/kanban.ts<br/>useKanbanStore")]
 
   app -- "route /" --> list["views/BoardsListView.vue<br/>create, rename, delete boards"]
   app -- "route /boards/:boardId<br/>prop boardId" --> detail["views/BoardDetailView.vue<br/>nested RouterView (keyed by path)"]
 
   list -. "boardList, addBoard, deleteBoard,<br/>v-model writes board.title" .-> store
+  list --> toggleList["ThemeToggle.vue"]
   list --> toolbar["components/BoardToolbar.vue<br/>Export JSON, Import JSON, Reset"]
   list -- "v-model (board title)" --> inlineList["InlineEdit.vue"]
   list -- "emits add(title)" --> addBoard["AddItemForm.vue"]
@@ -39,20 +40,24 @@ flowchart TD
 
   board -. "getters, actions,<br/>v-model writes column.title" .-> store
   board -- ":title + @update:title<br/>(→ renameBoard)" --> header["components/BoardHeader.vue<br/>back link, title via InlineEdit"]
+  header --> toggle["components/ThemeToggle.vue<br/>useTheme() via inject"]
+  app -. "provide(themeKey)" .-> toggle
   board -- "prop labels" --> filterBar["components/FilterBar.vue<br/>search input, label toggles, clear"]
   filters[["composables/useBoardFilters.ts<br/>derived from route.query"]]
   board -. "isFiltering, matches" .-> filters
   filterBar -. "reads filters;<br/>setSearchText (debounced), toggleLabel, clearFilters" .-> filters
   board -- "v-model:title,<br/>props cardCount, totalCount, emptyText" --> column["components/KanbanColumn.vue<br/>slots: #actions, default, #footer<br/>TransitionGroup around the default slot"]
-  board -- "prop card, emits delete<br/>(into column's default slot)" --> card["components/KanbanCard.vue<br/>title is a RouterLink to the card route"]
-  board -- "emits add(title)<br/>(column #footer, and 'Add column')" --> add["AddItemForm.vue"]
+  board -- "prop card, emits delete<br/>(into column's default slot)" --> card["components/KanbanCard.vue<br/>title is a RouterLink to the card route<br/>default slot for extra controls"]
+  board -- "props card, column, boardId, canReorder<br/>(into the card's default slot)" --> move["components/CardMoveMenu.vue<br/>details/summary: columns, Up, Down"]
+  move -. "columnsForBoard, moveCard" .-> store
+  board -- ":open + @update:open (card forms only)<br/>emits add(title)<br/>(column #footer, and 'Add column')" --> add["AddItemForm.vue<br/>v-model:open, v-focus directive"]
   column -- "v-model (title)" --> inlineCol["InlineEdit.vue<br/>defineModel"]
 
   dnd[["composables/useDragAndDrop.ts"]]
   board -. "calls once in setup" .-> dnd
   dnd -. "onDrop → moveCard" .-> store
 
-  editor -- "v-model:open, prop title<br/>emits closed" --> modal["components/BaseModal.vue<br/>Teleport to body + Transition<br/>closes on Esc, backdrop, ×"]
+  editor -- "v-model:open, prop title<br/>emits closed" --> modal["components/BaseModal.vue<br/>Teleport to body + Transition<br/>closes on Esc, backdrop, ×<br/>useModalFocus()"]
   editor -. "updateCard, deleteCard" .-> store
   editor -. "on closed: router.push(board)" .-> detail
 ```
@@ -83,6 +88,45 @@ flowchart LR
 - A column shows "N of M" and, if nothing matches, "No matching cards".
 - `KanbanCard`'s link and `CardEditor`'s close navigation both carry `route.query`, so filters survive opening a card.
 - `store.labelsForBoard(boardId)` supplies the label list.
+
+## Theme
+
+`composables/useTheme.ts` holds a typed `InjectionKey<ThemeContext>`. `App.vue` calls `provideTheme()` once; any descendant calls `useTheme()`.
+
+```mermaid
+flowchart LR
+  os["OS preference<br/>usePreferredDark()"]
+  ls[("localStorage<br/>kanban-theme: auto | light | dark")]
+  ctx["provideTheme() in App.vue<br/>theme: computed, toggleTheme()"]
+  html["html data-theme attribute"]
+  css["main.css<br/>:root[data-theme='dark'] overrides the colour tokens"]
+  toggle["ThemeToggle.vue<br/>inject via useTheme()"]
+
+  os --> ctx
+  ls --> ctx
+  ctx -- "watchEffect" --> html --> css
+  ctx -- "provide(themeKey)" --> toggle
+  toggle -- "toggleTheme()" --> ls
+```
+
+- Components never read the theme to pick colours; they use the CSS variables, which change with the attribute.
+- `--color-accent-fill`, `--color-danger-fill` and `--color-on-fill` are for solid buttons, so text on them keeps its contrast in both themes.
+
+## Keyboard and accessibility
+
+`composables/useKeyboardShortcuts.ts` wraps VueUse's `onKeyStroke`. Each component registers the shortcut it owns, and the listener is removed when that component unmounts.
+
+| Key | Registered in | Effect |
+|---|---|---|
+| `n` | `BoardView` | Opens the add-card form in the first column (sets `addingToColumnId`) |
+| `/` | `FilterBar` | Focuses the search input |
+| `Esc` | `BaseModal` | Closes the modal |
+
+- Except for `Esc`, shortcuts are ignored while typing in a field, with Ctrl/Cmd/Alt held, or while a modal is open.
+- `composables/useModalFocus.ts` moves focus into the dialog on mount (to the `data-autofocus` field), wraps Tab at both ends, and returns focus to the opener on unmount.
+- `CardMoveMenu` is the keyboard alternative to drag and drop. After a move it focuses the card's menu in its new place. Up and Down are disabled while filters are active.
+- `InlineEdit` and `AddItemForm` return focus to their button after Enter or Esc.
+- `main.css` sets one `:focus-visible` outline for every focusable element.
 
 ## Drag and drop
 
@@ -248,4 +292,4 @@ flowchart TD
 
 ## Not built yet
 
-- Modal focus management, themes, keyboard shortcuts: phase 8
+- Component tests, production build check and README: phase 9

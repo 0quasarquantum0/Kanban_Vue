@@ -13,6 +13,7 @@ defineProps<{
 const isEditing = ref(false)
 const draft = ref('')
 const input = useTemplateRef('input')
+const textButton = useTemplateRef('textButton')
 
 async function startEditing() {
   draft.value = model.value
@@ -22,15 +23,22 @@ async function startEditing() {
   input.value?.select()
 }
 
-function commit() {
+// After Enter or Esc, focus returns to the text so a keyboard user keeps their place.
+// After a blur it doesn't: the user has already moved focus somewhere else.
+// (Enter is bound with .prevent: otherwise the same key press would go on to "click" the
+// newly focused button and reopen the editor.)
+async function stopEditing(refocus: boolean) {
+  isEditing.value = false
+  if (!refocus) return
+  await nextTick()
+  textButton.value?.focus()
+}
+
+function commit(refocus: boolean) {
   if (!isEditing.value) return
   const value = draft.value.trim()
   if (value && value !== model.value) model.value = value
-  isEditing.value = false
-}
-
-function cancel() {
-  isEditing.value = false
+  stopEditing(refocus)
 }
 </script>
 
@@ -42,12 +50,13 @@ function cancel() {
     class="inline-edit inline-edit--input"
     type="text"
     :aria-label="label"
-    @keyup.enter="commit"
-    @keyup.esc="cancel"
-    @blur="commit"
+    @keydown.enter.prevent="commit(true)"
+    @keydown.esc="stopEditing(true)"
+    @blur="commit(false)"
   />
   <button
     v-else
+    ref="textButton"
     class="inline-edit inline-edit--text"
     type="button"
     :aria-label="`${label}: ${model}. Click to rename`"

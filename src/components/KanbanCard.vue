@@ -62,6 +62,9 @@ function formatDate(iso: string): string {
         Due {{ formatDate(card.dueDate) }}
       </time>
     </footer>
+
+    <!-- Extra controls from the parent, e.g. the "Move to…" menu. -->
+    <slot />
   </article>
 </template>
 

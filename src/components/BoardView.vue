@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useBoardFilters } from '@/composables/useBoardFilters'
 import { useDragAndDrop } from '@/composables/useDragAndDrop'
+import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 import { useKanbanStore } from '@/stores/kanban'
-import type { Board, Column } from '@/types'
+import type { Board, Column, ID } from '@/types'
 import AddItemForm from './AddItemForm.vue'
 import BoardHeader from './BoardHeader.vue'
+import CardMoveMenu from './CardMoveMenu.vue'
 import FilterBar from './FilterBar.vue'
 import KanbanCard from './KanbanCard.vue'
 import KanbanColumn from './KanbanColumn.vue'
@@ -37,6 +39,14 @@ const {
   onDragEnd,
   dropPosition,
 } = useDragAndDrop({ onDrop: store.moveCard })
+
+// Which column's add-card form is open. Held here so the `n` shortcut can open the first one.
+const addingToColumnId = ref<ID | null>(null)
+useKeyboardShortcuts({
+  n: () => {
+    addingToColumnId.value = columns.value[0]?.column.id ?? null
+  },
+})
 
 function removeColumn(column: Column) {
   const count = column.cardIds.length
@@ -86,12 +96,21 @@ function removeColumn(column: Column) {
           @dragstart="onDragStart($event, card.id)"
           @dragend="onDragEnd"
           @delete="store.deleteCard(card.id)"
-        />
+        >
+          <CardMoveMenu
+            :card="card"
+            :column="column"
+            :board-id="board.id"
+            :can-reorder="!isFiltering"
+          />
+        </KanbanCard>
 
         <template #footer>
           <AddItemForm
             label="Add card"
             placeholder="Card title"
+            :open="addingToColumnId === column.id"
+            @update:open="addingToColumnId = $event ? column.id : null"
             @add="store.addCard(column.id, $event)"
           />
         </template>

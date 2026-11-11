@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useTemplateRef, watch } from 'vue'
 import { watchDebounced } from '@vueuse/core'
 import { useBoardFilters } from '@/composables/useBoardFilters'
+import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 
 const props = defineProps<{
   /** Every label used on the board. */
@@ -22,6 +23,9 @@ watch(searchText, (text) => {
   if (text !== draft.value.trim()) draft.value = text
 })
 
+const searchInput = useTemplateRef('searchInput')
+useKeyboardShortcuts({ '/': () => searchInput.value?.focus() })
+
 // Also show labels that are in the URL but no longer on the board, so they can be switched off.
 const allLabels = computed(() => [...new Set([...props.labels, ...activeLabels.value])])
 </script>
@@ -30,11 +34,13 @@ const allLabels = computed(() => [...new Set([...props.labels, ...activeLabels.v
   <section class="filters" aria-label="Filter cards">
     <div class="filters__row">
       <input
+        ref="searchInput"
         v-model="draft"
         class="filters__search"
         type="search"
-        placeholder="Search cards"
+        placeholder="Search cards (press /)"
         aria-label="Search cards"
+        aria-keyshortcuts="/"
       />
 
       <ul v-if="allLabels.length > 0" class="filters__labels" aria-label="Filter by label">

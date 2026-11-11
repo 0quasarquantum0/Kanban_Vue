@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { nextTick, ref, useTemplateRef } from 'vue'
+import { nextTick, ref, useTemplateRef, watch } from 'vue'
+import type { Directive } from 'vue'
 
 defineProps<{
   /** Button text, e.g. "Add card". */
@@ -11,19 +12,26 @@ const emit = defineEmits<{
   add: [title: string]
 }>()
 
-const isOpen = ref(false)
+// Works as local state when the parent doesn't bind it, and as a two-way binding when it
+// does. BoardView binds it so the `n` shortcut can open the first column's form.
+const isOpen = defineModel<boolean>('open', { default: false })
 const title = ref('')
 const input = useTemplateRef('input')
+const openButton = useTemplateRef('openButton')
 
-async function open() {
-  isOpen.value = true
-  await nextTick()
-  input.value?.focus()
-}
+// A local custom directive, used as `v-focus`. `mounted` runs when the element is
+// inserted, so the input takes focus however the form was opened.
+const vFocus: Directive<HTMLElement> = { mounted: (el) => el.focus() }
 
-function close() {
+watch(isOpen, (open) => {
+  if (!open) title.value = ''
+})
+
+// Esc: close and hand focus back, so a keyboard user stays where they were.
+async function cancel() {
   isOpen.value = false
-  title.value = ''
+  await nextTick()
+  openButton.value?.focus()
 }
 
 // Stays open after submitting so several items can be added in a row.
@@ -36,7 +44,7 @@ function submit() {
 }
 
 function closeIfEmpty() {
-  if (!title.value.trim()) close()
+  if (!title.value.trim()) isOpen.value = false
 }
 </script>
 
@@ -45,17 +53,20 @@ function closeIfEmpty() {
     <input
       ref="input"
       v-model="title"
+      v-focus
       class="add-item__input"
       type="text"
       :placeholder="placeholder"
       :aria-label="placeholder ?? label"
       @keyup.enter="submit"
-      @keyup.esc="close"
+      @keyup.esc="cancel"
       @blur="closeIfEmpty"
     />
     <button class="add-item__submit" type="button" @click="submit">Add</button>
   </div>
-  <button v-else class="add-item__open" type="button" @click="open">+ {{ label }}</button>
+  <button v-else ref="openButton" class="add-item__open" type="button" @click="isOpen = true">
+    + {{ label }}
+  </button>
 </template>
 
 <style scoped>
@@ -88,8 +99,8 @@ function closeIfEmpty() {
 }
 
 .add-item__submit {
-  color: #fff;
-  background: var(--color-accent);
+  color: var(--color-on-fill);
+  background: var(--color-accent-fill);
 }
 
 .add-item__open {

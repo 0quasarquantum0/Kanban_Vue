@@ -58,7 +58,13 @@ function goToBoard() {
     <form class="editor" @submit.prevent="save">
       <label class="editor__field">
         <span class="editor__label">Title</span>
-        <input v-model.trim="draft.title" class="editor__input" type="text" required />
+        <input
+          v-model.trim="draft.title"
+          class="editor__input"
+          type="text"
+          required
+          data-autofocus
+        />
       </label>
 
       <label class="editor__field">

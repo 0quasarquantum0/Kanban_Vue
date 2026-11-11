@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { useId } from 'vue'
-import { onKeyStroke } from '@vueuse/core'
+import { useId, useTemplateRef } from 'vue'
+import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
+import { useModalFocus } from '@/composables/useModalFocus'
 
 // Setting this to false (from inside or from the parent) plays the leave animation.
 const open = defineModel<boolean>('open', { required: true })
@@ -16,9 +17,16 @@ const emit = defineEmits<{
 
 const titleId = useId()
 
-onKeyStroke('Escape', () => {
-  open.value = false
+const dialog = useTemplateRef('dialog')
+
+useKeyboardShortcuts({
+  Escape: () => {
+    open.value = false
+  },
 })
+
+// Moves focus into the dialog on mount, traps Tab inside it, and restores focus on unmount.
+const { trapFocus } = useModalFocus(dialog)
 </script>
 
 <template>
@@ -28,7 +36,15 @@ onKeyStroke('Escape', () => {
     <Transition name="modal" appear @after-leave="emit('closed')">
       <!-- mousedown, not click: a text-selection drag that ends on the backdrop shouldn't close. -->
       <div v-if="open" class="modal" @mousedown.self="open = false">
-        <div class="modal__dialog" role="dialog" aria-modal="true" :aria-labelledby="titleId">
+        <div
+          ref="dialog"
+          class="modal__dialog"
+          role="dialog"
+          aria-modal="true"
+          :aria-labelledby="titleId"
+          tabindex="-1"
+          @keydown.tab="trapFocus"
+        >
           <header class="modal__header">
             <h2 :id="titleId" class="modal__title">{{ title }}</h2>
             <button
