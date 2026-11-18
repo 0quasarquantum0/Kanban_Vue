@@ -1,48 +1,64 @@
 import { ref } from 'vue'
 import type { Ref } from 'vue'
-import { watchDebounced } from '@vueuse/core'
-import { ApiError, getState, putState } from '@/api'
-import type { KanbanState } from '@/types'
+import { ApiError, getState } from '@/api'
+import type { Snapshot, Written } from '@/api'
+import type { ID, KanbanState } from '@/types'
 
 /** `idle` until the first load starts; `error` only when the first load failed. */
 export type SyncStatus = 'idle' | 'loading' | 'ready' | 'error'
-
-export const SAVE_DELAY_MS = 300
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
 /**
- * Keeps `state` in step with the Go server: loads it once, then saves every change with a
- * debounced deep watch (the same idea as `useStorage` in phase 5, with a server behind it).
+ * Keeps `state` in step with the Go server.
  *
- * The server tags each state with a version. A save carries the version this tab last saw; if
- * another tab saved in between the server answers 409, and this tab reloads and tells the user.
+ * Reading: the state is loaded once, and reloaded when this tab learns it is behind.
+ *
+ * Writing: every store action changes `state` first (so the screen updates at once) and then
+ * calls `enqueue` with the matching request. Requests run one at a time, in the order they were
+ * made, because the server needs `addCard` before it can `updateCard` that card. If one fails,
+ * the requests queued behind it are dropped and the state is reloaded from the server, which
+ * undoes the optimistic changes that never made it there.
  */
 export function useServerSync(state: Ref<KanbanState>) {
   const status = ref<SyncStatus>('idle')
   const loadError = ref<string | null>(null)
   /** A message for the user about something that went wrong after the first load. */
   const notice = ref<string | null>(null)
+  /** The server version this tab has caught up with. */
   const version = ref(0)
 
-  // The JSON the server is known to hold. Comparing against it stops the watch from saving
-  // state that was only just loaded, and makes a save with no real change a no-op.
-  let syncedJson = JSON.stringify(state.value)
   let firstLoad: Promise<void> | null = null
-  let isSaving = false
-  let saveAgain = false
+  let tail: Promise<void> = Promise.resolve() // the end of the request queue
+  let pending = 0 // requests queued or running
+  let generation = 0 // raised on every failure, so requests queued before it can be skipped
 
+  // --- reading ---
+
+  function apply(snapshot: Snapshot): void {
+    state.value = snapshot.state
+    version.value = snapshot.version
+    loadError.value = null
+    status.value = 'ready'
+  }
+
+  /**
+   * Loads the server's state into the store. It waits for queued requests to finish first and,
+   * if another change was queued while the response was on its way, throws the response away
+   * and asks again: replacing the state then would wipe out a change the server has not seen.
+   */
   async function load(): Promise<void> {
     if (status.value !== 'ready') status.value = 'loading'
     try {
-      const snapshot = await getState()
-      state.value = snapshot.state
-      version.value = snapshot.version
-      syncedJson = JSON.stringify(snapshot.state)
-      loadError.value = null
-      status.value = 'ready'
+      for (;;) {
+        await settled()
+        const snapshot = await getState()
+        if (pending > 0) continue
+        apply(snapshot)
+        return
+      }
     } catch (error) {
       if (status.value === 'ready') {
         notice.value = `Couldn't refresh from the server: ${messageOf(error)}`
@@ -59,43 +75,95 @@ export function useServerSync(state: Ref<KanbanState>) {
     return firstLoad
   }
 
-  /** Sends the state to the server now, if it differs from what the server has. */
-  async function saveNow(): Promise<void> {
-    if (status.value !== 'ready') return
-    if (isSaving) {
-      saveAgain = true // the running save will go round again once it finishes
-      return
-    }
+  /** Reloads if the server has moved past `target` and this tab has not caught up. */
+  async function refreshIfBehind(target: number): Promise<void> {
+    await settled()
+    if (version.value >= target) return
+    await load()
+  }
 
-    isSaving = true
+  // --- writing ---
+
+  /** Resolves once every request queued so far has finished (or been skipped). */
+  async function settled(): Promise<void> {
+    let end: Promise<void>
+    do {
+      end = tail
+      await end
+    } while (end !== tail)
+  }
+
+  /** What the user is told when the request behind a change failed. */
+  function describeFailure(error: unknown): string {
+    if (error instanceof ApiError && error.status === 409) {
+      return (
+        'Your last change conflicted with an edit made in another tab or window. ' +
+        'The board was reloaded, so that change was not saved.'
+      )
+    }
+    if (error instanceof ApiError && error.status === 404) {
+      return (
+        'Something you changed no longer exists; it was probably deleted in another tab. ' +
+        'The board was reloaded.'
+      )
+    }
+    return `Couldn't save your change: ${messageOf(error)} The board was reloaded.`
+  }
+
+  async function recover(error: unknown): Promise<void> {
+    generation += 1 // everything queued before this moment was built on state that is now wrong
+    const message = describeFailure(error)
     try {
-      do {
-        saveAgain = false
-        const json = JSON.stringify(state.value)
-        if (json === syncedJson) continue
-        version.value = await putState(version.value, state.value)
-        syncedJson = json
-        notice.value = null
-      } while (saveAgain)
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 409) {
-        await load()
-        notice.value =
-          'Your last change conflicted with an edit made in another tab or window. ' +
-          'The board was reloaded, so that change was not saved.'
-      } else {
-        notice.value = `Couldn't save your changes: ${messageOf(error)}`
-      }
-    } finally {
-      isSaving = false
+      apply(await getState())
+      notice.value = message
+    } catch (reloadError) {
+      // The server cannot be reached at all, so the screen keeps the unsaved changes.
+      notice.value = `Couldn't save your change: ${messageOf(reloadError)}`
     }
   }
 
-  watchDebounced(state, saveNow, { deep: true, debounce: SAVE_DELAY_MS, maxWait: 2000 })
+  /** The reply to a write told us the version it produced. */
+  function accept(written: Written, expectedId: ID | undefined): void {
+    const gap = written.version > version.value + 1
+    version.value = Math.max(version.value, written.version)
+    const idDiffers = written.id !== undefined && written.id !== expectedId
+    // Either another client wrote in between, or the server used a different id than ours.
+    if (gap || idDiffers) void load()
+  }
+
+  /**
+   * Queues a request. `expectedId` is the id the screen already uses for a thing that the
+   * request creates; if the server picked another one, the state is reloaded.
+   */
+  function enqueue(request: () => Promise<Written>, expectedId?: ID): void {
+    const queuedAt = generation
+    pending += 1
+    tail = tail.then(async () => {
+      try {
+        if (queuedAt !== generation) return // an earlier request failed; this change was undone
+        accept(await request(), expectedId)
+      } catch (error) {
+        await recover(error)
+      } finally {
+        pending -= 1
+      }
+    })
+  }
 
   function dismissNotice() {
     notice.value = null
   }
 
-  return { status, loadError, notice, version, load, ensureLoaded, saveNow, dismissNotice }
+  return {
+    status,
+    loadError,
+    notice,
+    version,
+    load,
+    ensureLoaded,
+    refreshIfBehind,
+    settled,
+    enqueue,
+    dismissNotice,
+  }
 }

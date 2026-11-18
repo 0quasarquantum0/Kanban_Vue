@@ -65,7 +65,8 @@ function removeColumn(column: Column) {
       <KanbanColumn
         v-for="{ column, cards, total } in columns"
         :key="column.id"
-        v-model:title="column.title"
+        :title="column.title"
+        @update:title="store.renameColumn(column.id, $event)"
         :card-count="cards.length"
         :total-count="isFiltering ? total : undefined"
         :empty-text="isFiltering && total > 0 ? 'No matching cards' : undefined"

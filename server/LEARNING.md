@@ -260,3 +260,40 @@ The migration runner records applied files in a `schema_migrations` table, so ea
 ### Reading the `-db` flag
 
 `flag.String("db", "kanban.db", ...)` (`cmd/kanban/main.go:19`) gives the database path. The file `kanban.db` (plus `-wal` and `-shm` files, because the connection uses write-ahead logging) is created in the directory where you run the server, and is git-ignored.
+
+## Step 6 — Per-action endpoints
+
+### Designing REST resources
+
+Step 3 had one endpoint that moved the whole state. Now each thing has its own URL, a **resource**: `/api/boards/{boardId}`, `/api/columns/{columnId}`, `/api/cards/{cardId}`. The HTTP *method* is the verb: `POST` creates, `PATCH` changes some fields, `PUT` states a whole value, `DELETE` removes. The table of ten routes is in `docs/api.md` and is registered in `internal/api/resources.go`. Compare Next.js route handlers: there the folder names are the URL; here the `ServeMux` pattern strings are (`"PATCH /api/columns/{columnId}"`), read with `r.PathValue("columnId")` (`internal/api/resources.go:84`).
+
+`PATCH` vs `PUT`: renaming a board sends only `{"title": ...}`, which is a partial change, so it is a PATCH. Moving a card sends `{"columnId", "index"}`, the card's whole new position, and sending it twice changes nothing more, so it is a `PUT` to `/position` (a *sub-resource*, a noun, not a verb like `/move`). A missing ID is a **404**, a bad body a **400**, a stale whole-state write a **409**.
+
+### Functions that return handlers
+
+Renaming a board and renaming a column are the same code with a different Store method. `rename(param, change)` (`internal/api/resources.go:144`) takes the path parameter's name and a *function* and returns an `http.HandlerFunc`. In the routes it reads `s.rename("boardId", s.store.RenameBoard)`: `s.store.RenameBoard` is a **method value**, a method already bound to its receiver that can be passed around like any function. It is the same idea as a higher-order function in JS, or `useX(store.renameBoard)`. Because Go checks that the passed function has the matching signature, passing `DeleteCard` where a rename is expected would not compile.
+
+### A real gotcha: `PathValue` and the mux
+
+The first version of `jsonRoutingErrors` asked the mux which handler matches (`mux.Handler(r)`) and then called that handler directly. Every `{wildcard}` came back empty, and the tests said `board "": not found`. Only `mux.ServeHTTP` records the matched wildcards on the request. The fix and its comment are at `internal/api/middleware.go:83`. Worth remembering: a router is more than a lookup table.
+
+### Pointers again: required vs optional fields
+
+In `cardPosition` (`internal/api/resources.go:44`) both fields are pointers, so that "absent" (nil, a 400) differs from `0`, a valid index. `Index *int` also makes `"index": 1.5` fail to decode instead of being rounded. For the card `PATCH`, `kanban.CardPatch` from step 2 does the same job with `Optional` for the one field that may be set to `null`.
+
+### Client-chosen IDs
+
+The frontend wants to show a new card *before* the server answers, so it needs the card's ID in advance. Create requests may carry an `id`; the server keeps it if it is a valid, unused UUID and invents one otherwise (`ChooseID`, step 1). The reply carries the ID that was actually used; if it differs, the frontend reloads. This is the same trick as using a temporary `uuid` for a to-do in an optimistic React Query mutation and swapping in the server's one afterwards.
+
+### Optimistic updates, in the Vue app
+
+Each Pinia action now changes `state` first, so the screen updates instantly, then queues one request (`src/stores/kanban.ts:145` shows `moveCard`). You already know this pattern from drag and drop, where the card jumps before anything is saved. Two things make it safe:
+
+- **Order.** `useServerSync` keeps a promise chain (`tail`, `src/composables/useServerSync.ts:141`) so requests run one at a time in the order they were made; otherwise `updateCard` could reach the server before the `addCard` that creates the card. This is the JavaScript counterpart of what a goroutine and a channel do in step 7.
+- **Failure.** If any request fails, the ones queued behind it are skipped (they were built on state that never reached the server), and `recover` reloads the whole state, which undoes the optimistic change. The user is told in a notice.
+
+Note that `deleteBoard` removes the columns and cards locally but sends *one* `DELETE`: the server's `ON DELETE CASCADE` (step 5) does the rest.
+
+### Bypassing actions is a bug now
+
+Two components used to write straight into store objects: `v-model="board.title"` and `v-model:title="column.title"`. With the step-4 deep watch that was fine, since any change was saved. With explicit actions the screen would change but no request would be sent. They now use `:model-value` plus `@update:model-value="store.renameBoard(...)"`, which is what `v-model` expands to. `src/__tests__/renames.spec.ts` renames through the real components and checks that the server heard about it.

@@ -80,7 +80,9 @@ func jsonRoutingErrors(mux *http.ServeMux) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handler, pattern := mux.Handler(r)
 		if pattern != "" {
-			handler.ServeHTTP(w, r)
+			// Go through mux.ServeHTTP, not handler.ServeHTTP: only the mux fills in the values
+			// of {wildcards} that r.PathValue reads.
+			mux.ServeHTTP(w, r)
 			return
 		}
 		handler.ServeHTTP(&routingErrorWriter{ResponseWriter: w}, r)

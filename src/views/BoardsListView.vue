@@ -38,7 +38,11 @@ function removeBoard(board: Board) {
       <li v-for="board in boardList" :key="board.id" class="boards__item">
         <div class="boards__item-header">
           <h2 class="boards__title">
-            <InlineEdit v-model="board.title" label="Board title" />
+            <InlineEdit
+              :model-value="board.title"
+              label="Board title"
+              @update:model-value="store.renameBoard(board.id, $event)"
+            />
           </h2>
           <button
             class="icon-button icon-button--danger"

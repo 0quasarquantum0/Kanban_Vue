@@ -25,6 +25,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/health", s.health)
 	mux.HandleFunc("GET /api/state", s.getState)
 	mux.HandleFunc("PUT /api/state", s.putState)
+	s.routeResources(mux)
 
 	// The first wrapper is the outermost: logging sees the 500 that recoverPanics writes.
 	return logRequests(s.log, recoverPanics(s.log, jsonRoutingErrors(mux)))

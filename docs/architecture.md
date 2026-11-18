@@ -1,6 +1,6 @@
 # Architecture
 
-_Last updated: Go step 5 (SQLite persistence). The Vue phases (0–9) are complete; the Go backend in `server/` is being built step by step._
+_Last updated: Go step 6 (per-action endpoints). The Vue phases (0–9) are complete; the Go backend in `server/` is being built step by step._
 
 This file shows the project as it currently stands. It is updated at the end of every phase and only diagrams what exists. The frontend sections come first; the **Go backend** section is near the end.
 
@@ -175,7 +175,7 @@ stateDiagram-v2
 
 ## Store
 
-`stores/kanban.ts` is a Pinia setup store. State is one deep ref of `KanbanState`, empty until the Go server's copy has been loaded. `composables/useServerSync.ts` (called from inside the store, its refs and functions spread into the store's return value) loads it and saves every change back (see Server sync below).
+`stores/kanban.ts` is a Pinia setup store. State is one deep ref of `KanbanState`, empty until the Go server's copy has been loaded. `composables/useServerSync.ts` (called from inside the store, its refs and functions spread into the store's return value) loads it and sends every action to the server (see Server sync below).
 
 ```mermaid
 classDiagram
@@ -187,7 +187,8 @@ classDiagram
     +version: number
     +ensureLoaded() Promise
     +load() Promise
-    +saveNow() Promise
+    +settled() Promise
+    +refreshIfBehind(version) Promise
     +dismissNotice()
     +boardList: Board[]
     +columnsForBoard(boardId) Column[]
@@ -212,32 +213,32 @@ classDiagram
 - `deleteColumn` also deletes the column's cards; `deleteBoard` deletes its columns the same way.
 - `moveCard` places the card at `toIndex` in the target column (clamped). It is called by the drag-and-drop composable.
 - `importState` replaces the whole state only if `isKanbanState(data)` passes, and returns whether it did.
-- Unit tests: `src/stores/__tests__/kanban.spec.ts` (`addCard`, `moveCard`, `deleteColumn`, `deleteBoard`, `importState`, `resetToDemo`) and `src/composables/__tests__/useServerSync.spec.ts` (loading, saving, conflicts). Both run against `src/__tests__/fakeServer.ts`, a stand-in for the Go server's `fetch` endpoints.
+- Unit tests: `src/stores/__tests__/kanban.spec.ts` (`addCard`, `moveCard`, `deleteColumn`, `deleteBoard`, `importState`, `resetToDemo`) and `src/composables/__tests__/useServerSync.spec.ts` (loading, saving, conflicts). Both run against `src/__tests__/fakeServer.ts`, a stand-in for the Go server's `fetch` endpoints; `src/__tests__/renames.spec.ts` checks that renaming in the UI reaches the server.
 
 ## Server sync
 
 The server owns the data (`docs/api.md`). The Vite dev server forwards `/api` to it; `KANBAN_API` (environment or a git-ignored `.env.local`) picks the target, default `http://localhost:8080`.
 
+Reading: the store loads the whole state once (`GET /api/state`) and reloads it when it learns it is behind. Writing: every store action updates `state` first (optimistic) and queues one request.
+
 ```mermaid
 sequenceDiagram
-  participant App as App.vue
-  participant Guard as router guards
-  participant Store as kanban store (useServerSync)
-  participant Go as Go server (/api/state)
+  participant UI as component
+  participant Store as kanban store action
+  participant Q as useServerSync queue
+  participant Go as Go server
 
-  App->>Store: ensureLoaded()
-  Guard->>Store: await ensureLoaded()
-  Store->>Go: GET /api/state
-  Go-->>Store: { version, state }
-  Note over Store: status = ready, App renders RouterView
-  Note over Store: user edits state (deep watch, 300ms debounce)
-  Store->>Go: PUT /api/state { version, state }
-  alt version is current
-    Go-->>Store: { version: n+1 }
-  else another tab saved first
-    Go-->>Store: 409 Conflict
-    Store->>Go: GET /api/state (reload)
-    Note over Store: notice: "your change conflicted"
+  UI->>Store: addCard(columnId, title)
+  Store->>Store: state changes at once (client-made UUID)
+  Store->>Q: enqueue(() => api.addCard(...), expectedId)
+  Note over Q: requests run one at a time, in order
+  Q->>Go: POST /api/columns/{id}/cards { id, title }
+  alt success
+    Go-->>Q: 201 { version, card }
+    Note over Q: version = reply.version<br/>gap or different id → reload
+  else any failure (404, 409, 500, offline)
+    Go-->>Q: error
+    Note over Q: generation++ (queued requests are skipped)<br/>GET /api/state replaces the optimistic state<br/>notice shown to the user
   end
 ```
 
@@ -248,23 +249,24 @@ flowchart LR
   valid{{"validation.ts<br/>isKanbanState()"}}
   toolbar["BoardToolbar.vue"]
   file[/"kanban-board.json"/]
-  api["api.ts<br/>getState, putState, ApiError"]
+  api["api.ts<br/>getState, per-action calls,<br/>putState, ApiError"]
 
-  api -- "load: validated response" --> state
-  state -- "deep watch (debounced) → saveNow" --> api
-  seed -- "Reset to demo data" --> state
+  api -- "load / reload: validated response" --> state
+  state -- "each action: one queued request" --> api
+  seed -- "Reset to demo data → PUT /api/state" --> state
   state -- "Export JSON" --> toolbar --> file
   file -- "Import JSON" --> toolbar -- "importState(data)" --> valid
-  valid -- "valid: replace state" --> state
+  valid -- "valid: replace state, PUT /api/state" --> state
   valid -. "invalid: error shown, nothing changes" .-> toolbar
 ```
 
-- `App.vue` shows "Loading…" until the first load finishes and an error screen (with a reload button) if it failed; `SyncNotice.vue` shows conflicts and save failures.
-- `useServerSync` remembers the JSON the server holds, so the state it has just loaded is never saved back, and a save with no change sends nothing. Saves never overlap: a change during a save triggers one more round afterwards.
+- `composables/useServerSync.ts` holds the queue (`enqueue`, `settled`), the version, `status`, `notice`, and `load`/`ensureLoaded`/`refreshIfBehind`. It is called inside the store and its members are spread into the store's return value.
+- `load` waits for the queue to empty and discards a response if a change was queued while it was in flight, so a reload can never wipe out a change the server has not seen.
+- Whole-state writes (`importState`, `resetToDemo`) send the version they are based on; a stale one gets 409, which shows the conflict notice and reloads.
+- `App.vue` shows "Loading…" until the first load finishes and an error screen (with a reload button) if it failed; `SyncNotice.vue` shows failures.
+- Components never write into store entities. `BoardView` and `BoardsListView` rename through `renameColumn` / `renameBoard`; a direct `v-model` on store state would change the screen but never reach the server.
 - `src/validation.ts` checks the shape of every entity, that each is stored under its own id, that every referenced column and card exists and is placed only once, and that no column or card is left unplaced (the server's database cannot hold orphans). Tests: `src/__tests__/validation.spec.ts`.
-- Reset asks for confirmation inline in the toolbar before calling `resetToDemo()`.
 - The theme preference is the only thing still in `localStorage`. `vitest.config.ts` passes `--no-experimental-webstorage` so Node's own `localStorage` global doesn't hide jsdom's in tests.
-
 
 ## Data model
 
@@ -463,6 +465,7 @@ flowchart LR
 ```
 
 - `GET /api/state` returns `{ version, state }`; `PUT /api/state` takes the same shape, validates it, checks the version (stale → 409) and saves it.
+- `resources.go` registers the ten per-action routes (`POST /api/boards`, `PATCH /api/columns/{columnId}`, `PUT /api/cards/{cardId}/position`, …). `rename` and `remove` are functions that return handlers, so boards, columns and cards share the code. Each write returns the new version.
 - `decodeBody` caps the body size, rejects unknown fields and trailing data.
 - `main.go` opens `kanban.OpenSQLite(ctx, *dbPath)` (flag `-db`, default `kanban.db`), seeds it on first run with `EnsureSeeded`, and passes it to `api.New(store, log).Handler()`.
 
@@ -470,4 +473,4 @@ flowchart LR
 
 Nothing from the Vue plan. Optional stretch goals in `CLAUDE.md` (only if asked): a Nuxt port, touch drag and drop, undo/redo.
 
-Go backend, still to come: per-action endpoints (6), live updates (7), embedded frontend (8).
+Go backend, still to come: live updates (7), embedded frontend (8).

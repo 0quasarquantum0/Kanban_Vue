@@ -1,13 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { installFakeServer, type FakeServer } from '@/__tests__/fakeServer'
+import { createSeedState } from '@/seed'
 import { useKanbanStore } from '@/stores/kanban'
-import type { KanbanState } from '@/types'
 
 let server: FakeServer
 
-function boardTitles(state: KanbanState): string[] {
-  return Object.values(state.boards).map((board) => board.title)
+/** A store that has loaded the demo state from the fake server. */
+async function loadedStore() {
+  const store = useKanbanStore()
+  await store.ensureLoaded()
+  server.requests.length = 0 // forget the load; tests look at what the actions send
+  return store
+}
+
+function firstColumn(store: ReturnType<typeof useKanbanStore>) {
+  const board = store.boardList[0]
+  const column = board && store.columnsForBoard(board.id)[0]
+  if (!board || !column) throw new Error('seed is empty')
+  return { board, column }
 }
 
 describe('server sync (through the kanban store)', () => {
@@ -17,7 +28,6 @@ describe('server sync (through the kanban store)', () => {
   })
 
   afterEach(() => {
-    vi.useRealTimers()
     vi.unstubAllGlobals()
   })
 
@@ -38,6 +48,7 @@ describe('server sync (through the kanban store)', () => {
 
       expect(store.status).toBe('ready')
       expect(store.boardList.map((board) => board.title)).toEqual(['Vue Kanban'])
+      expect(store.version).toBe(1)
       expect(server.requests).toEqual(['GET /api/state'])
     })
 
@@ -72,7 +83,7 @@ describe('server sync (through the kanban store)', () => {
     })
 
     it('rejects a response that is not a valid state', async () => {
-      server.state = { boards: {}, columns: {} } as unknown as KanbanState
+      server.state = { boards: {}, columns: {} } as unknown as typeof server.state
       const store = useKanbanStore()
 
       await store.ensureLoaded()
@@ -81,58 +92,135 @@ describe('server sync (through the kanban store)', () => {
     })
   })
 
-  describe('saving', () => {
-    it('sends nothing when nothing changed', async () => {
-      const store = useKanbanStore()
-      await store.ensureLoaded()
+  describe('actions update the screen first, then tell the server', () => {
+    it('adds a board locally before the server has answered, with the server using its id', async () => {
+      const store = await loadedStore()
 
-      await store.saveNow()
+      const board = store.addBoard('Roadmap')
 
-      expect(server.requests).toEqual(['GET /api/state'])
+      expect(store.state.boards[board.id]?.title).toBe('Roadmap') // already on screen
+      expect(server.requests).toEqual([]) // and the request is only queued
+      await store.settled()
+      expect(server.requests).toEqual(['POST /api/boards'])
+      expect(server.state.boards[board.id]?.title).toBe('Roadmap')
+      expect(store.version).toBe(server.version)
     })
 
-    it('does not save the state it has just loaded', async () => {
-      vi.useFakeTimers()
-      const store = useKanbanStore()
-      await store.ensureLoaded()
+    it('sends one request per action, in the order they were made', async () => {
+      const store = await loadedStore()
+      const { board, column } = firstColumn(store)
 
-      await vi.advanceTimersByTimeAsync(1000)
+      const card = store.addCard(column.id, 'New card')
+      store.updateCard(card?.id ?? '', { title: 'Renamed', labels: ['ui'], dueDate: null })
+      store.renameColumn(column.id, 'Backlog')
+      store.renameBoard(board.id, 'Main')
+      store.moveCard(card?.id ?? '', column.id, 0)
+      store.deleteCard(card?.id ?? '')
+      await store.settled()
 
-      expect(server.requests).toEqual(['GET /api/state'])
+      expect(server.requests).toEqual([
+        `POST /api/columns/${column.id}/cards`,
+        `PATCH /api/cards/${card?.id}`,
+        `PATCH /api/columns/${column.id}`,
+        `PATCH /api/boards/${board.id}`,
+        `PUT /api/cards/${card?.id}/position`,
+        `DELETE /api/cards/${card?.id}`,
+      ])
+      expect(server.state.columns[column.id]?.title).toBe('Backlog')
+      expect(server.state.boards[board.id]?.title).toBe('Main')
+      expect(server.state.cards[card?.id ?? '']).toBeUndefined()
     })
 
-    it('saves a change to the server and moves to the new version', async () => {
-      const store = useKanbanStore()
-      await store.ensureLoaded()
+    it('sends a board, its columns and its cards being deleted as one request', async () => {
+      const store = await loadedStore()
+      const { board } = firstColumn(store)
 
-      store.addBoard('Saved')
-      await store.saveNow()
+      store.deleteBoard(board.id)
+      await store.settled()
 
-      expect(boardTitles(server.state)).toEqual(['Vue Kanban', 'Saved'])
-      expect(server.version).toBe(2)
-      expect(store.version).toBe(2)
+      expect(server.requests).toEqual([`DELETE /api/boards/${board.id}`])
+      expect(store.boardList).toEqual([])
+      expect(server.state.cards).toEqual({})
     })
 
-    it('saves by itself shortly after a change (debounced)', async () => {
-      vi.useFakeTimers()
-      const store = useKanbanStore()
-      await store.ensureLoaded()
+    it('adds a column and moves a card between columns', async () => {
+      const store = await loadedStore()
+      const { board, column } = firstColumn(store)
+      const column2 = store.addColumn(board.id, 'Extra')
+      const cardId = column.cardIds[0] ?? ''
+
+      store.moveCard(cardId, column2?.id ?? '', 0)
+      await store.settled()
+
+      expect(server.state.columns[column2?.id ?? '']?.cardIds).toEqual([cardId])
+      expect(server.state.columns[column.id]?.cardIds).not.toContain(cardId)
+      expect(server.state.boards[board.id]?.columnIds).toContain(column2?.id)
+    })
+
+    it('does not send anything for an action on something that does not exist', async () => {
+      const store = await loadedStore()
+
+      store.renameBoard('nope', 'x')
+      store.deleteCard('nope')
+      store.moveCard('nope', 'nope', 0)
+      store.addCard('nope', 'x')
+      await store.settled()
+
+      expect(server.requests).toEqual([])
+    })
+
+    it('keeps its version in step with the server', async () => {
+      const store = await loadedStore()
 
       store.addBoard('One')
       store.addBoard('Two')
-      await vi.advanceTimersByTimeAsync(100)
-      expect(server.requests.filter((request) => request.startsWith('PUT'))).toHaveLength(0)
-      await vi.advanceTimersByTimeAsync(1000)
+      await store.settled()
 
-      expect(server.requests.filter((request) => request.startsWith('PUT'))).toHaveLength(1)
-      expect(boardTitles(server.state)).toEqual(['Vue Kanban', 'One', 'Two'])
+      expect(store.version).toBe(3)
+      expect(server.version).toBe(3)
     })
 
-    it('keeps the saved changes after a reload (a new store stands in for a refresh)', async () => {
-      const first = useKanbanStore()
-      await first.ensureLoaded()
+    it('replaces the whole state for an import and for a reset', async () => {
+      const store = await loadedStore()
+      const demo = createSeedState()
+
+      expect(store.importState(demo)).toBe(true)
+      await store.settled()
+      expect(server.requests).toEqual(['PUT /api/state'])
+      expect(Object.keys(server.state.boards)).toEqual(Object.keys(demo.boards))
+
+      store.resetToDemo()
+      await store.settled()
+      expect(server.requests).toEqual(['PUT /api/state', 'PUT /api/state'])
+      expect(store.version).toBe(server.version)
+    })
+
+    it('does not send an import that fails validation', async () => {
+      const store = await loadedStore()
+
+      expect(store.importState({ boards: {}, columns: {} })).toBe(false)
+      await store.settled()
+
+      expect(server.requests).toEqual([])
+    })
+
+    it('reloads when the server used a different id than the one proposed', async () => {
+      const store = await loadedStore()
+      server.ignoreClientIds = true
+
+      const board = store.addBoard('Mine')
+      await store.settled()
+      // The reload runs on its own once the queue is empty.
+      await vi.waitFor(() => expect(store.state.boards[board.id]).toBeUndefined())
+
+      expect(store.boardList.map((item) => item.title)).toContain('Mine')
+      expect(store.notice).toBeNull()
+    })
+
+    it('survives a refresh: a new store loads what the actions saved', async () => {
+      const first = await loadedStore()
       first.addBoard('Persisted')
-      await first.saveNow()
+      await first.settled()
 
       setActivePinia(createPinia())
       const reloaded = useKanbanStore()
@@ -140,53 +228,129 @@ describe('server sync (through the kanban store)', () => {
 
       expect(reloaded.boardList.map((board) => board.title)).toEqual(['Vue Kanban', 'Persisted'])
     })
-
-    it('tells the user when saving fails and tries again on the next change', async () => {
-      const store = useKanbanStore()
-      await store.ensureLoaded()
-
-      server.online = false
-      store.addBoard('Offline')
-      await store.saveNow()
-      expect(store.notice).toMatch(/couldn't save/i)
-
-      server.online = true
-      store.addBoard('Back online')
-      await store.saveNow()
-
-      expect(store.notice).toBeNull()
-      expect(boardTitles(server.state)).toEqual(['Vue Kanban', 'Offline', 'Back online'])
-    })
   })
 
-  describe('conflicts between tabs', () => {
-    it('reloads the server state and says so when the version is stale', async () => {
-      const store = useKanbanStore()
-      await store.ensureLoaded()
+  describe('when a request fails', () => {
+    it('reloads the server state, tells the user, and skips what was queued behind it', async () => {
+      const store = await loadedStore()
+      const { board } = firstColumn(store)
+      server.failNextWriteWith = 500
 
-      // Another tab saved first.
-      server.version += 1
-      server.state = { ...server.state, boards: {}, columns: {}, cards: {} }
+      store.renameBoard(board.id, 'Never saved')
+      store.addBoard('Queued behind the failure')
+      await store.settled()
+      await vi.waitFor(() => expect(store.notice).not.toBeNull())
 
-      store.addBoard('Mine')
-      await store.saveNow()
+      expect(store.notice).toMatch(/couldn't save/i)
+      expect(store.boardList.map((item) => item.title)).toEqual(['Vue Kanban']) // rolled back
+      expect(server.requests.filter((request) => request.startsWith('POST'))).toEqual([])
+      expect(server.state.boards[board.id]?.title).toBe('Vue Kanban')
+    })
 
-      expect(store.notice).toMatch(/another tab|elsewhere|conflict/i)
-      expect(store.boardList).toEqual([])
+    it('works again after recovering', async () => {
+      const store = await loadedStore()
+      server.failNextWriteWith = 500
+      store.addBoard('Lost')
+      await store.settled()
+
+      store.addBoard('Kept')
+      await store.settled()
+
+      expect(Object.values(server.state.boards).map((board) => board.title)).toEqual([
+        'Vue Kanban',
+        'Kept',
+      ])
+    })
+
+    it('explains a 404 as the item having been deleted elsewhere', async () => {
+      const store = await loadedStore()
+      const { column } = firstColumn(store)
+      const cardId = column.cardIds[0] ?? ''
+      delete server.state.cards[cardId] // another tab deleted it
+      server.state.columns[column.id]?.cardIds.splice(0, 1)
+
+      store.updateCard(cardId, { title: 'Too late' })
+      await store.settled()
+
+      expect(store.notice).toMatch(/no longer exists|deleted/i)
+    })
+
+    it('keeps the local state and says so when the server cannot be reached', async () => {
+      const store = await loadedStore()
+      server.online = false
+
+      store.addBoard('Offline')
+      await store.settled()
+
+      expect(store.notice).toMatch(/reach the server/i)
+      expect(store.boardList.map((board) => board.title)).toContain('Offline')
+    })
+
+    it('reports a rejected whole-state replace as a conflict', async () => {
+      const store = await loadedStore()
+      server.version += 1 // another tab saved first
+
+      store.resetToDemo()
+      await store.settled()
+
+      expect(store.notice).toMatch(/conflict/i)
       expect(store.version).toBe(server.version)
-      expect(boardTitles(server.state)).toEqual([])
     })
 
     it('can be dismissed', async () => {
-      const store = useKanbanStore()
-      await store.ensureLoaded()
-      server.version += 1
-      store.addBoard('Mine')
-      await store.saveNow()
+      const store = await loadedStore()
+      server.failNextWriteWith = 500
+      store.addBoard('x')
+      await store.settled()
 
       store.dismissNotice()
 
       expect(store.notice).toBeNull()
+    })
+  })
+
+  describe('changes made elsewhere', () => {
+    it('notices a gap in the versions and reloads, without losing a change still on its way', async () => {
+      const store = await loadedStore()
+      // Another tab adds a board straight on the server.
+      const elsewhereId = crypto.randomUUID()
+      server.state.boards[elsewhereId] = { id: elsewhereId, title: 'Elsewhere', columnIds: [] }
+      server.version += 1
+
+      store.addBoard('Mine') // reply says version 3 while we were at 1: a gap
+      await store.settled()
+      await vi.waitFor(() =>
+        expect(store.boardList.map((board) => board.title)).toContain('Elsewhere'),
+      )
+
+      expect(store.boardList.map((board) => board.title)).toEqual([
+        'Vue Kanban',
+        'Elsewhere',
+        'Mine',
+      ])
+      expect(store.version).toBe(server.version)
+    })
+
+    it('refreshIfBehind loads only when the server is ahead', async () => {
+      const store = await loadedStore()
+
+      await store.refreshIfBehind(store.version)
+      expect(server.requests).toEqual([])
+
+      server.version += 1
+      await store.refreshIfBehind(server.version)
+      expect(server.requests).toEqual(['GET /api/state'])
+      expect(store.version).toBe(server.version)
+    })
+
+    it('never replaces the state while a local change is still waiting to be sent', async () => {
+      const store = await loadedStore()
+
+      store.addBoard('In flight') // queued, not yet on the server
+      await store.load() // a reload has to wait for it, or it would wipe it out
+
+      expect(store.boardList.map((board) => board.title)).toContain('In flight')
+      expect(Object.values(server.state.boards).map((board) => board.title)).toContain('In flight')
     })
   })
 })
