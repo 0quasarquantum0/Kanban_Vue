@@ -192,3 +192,27 @@ In `putState` (`internal/api/state.go:24`) `Version` is `*int64`. If the client 
 ### Process wiring in `main`
 
 `run` in `cmd/kanban/main.go:30` returns an error to `main`, which logs it and exits with status 1. Calling `os.Exit` deep inside would skip `defer`s; the pattern "`main` calls `run`, `run` returns an error" is the idiomatic way to keep `main` tiny and testable.
+
+## Step 4 — Connect the Vue app
+
+No new Go here; the Go server from step 3 is used as it is. Two frontend ideas matter.
+
+### The dev proxy: one origin, no CORS
+
+The browser loads the app from Vite (`http://localhost:5173`) and the API lives on the Go server (`:8080`). Two different origins would need CORS headers on the Go side. Instead, the app calls a relative URL (`fetch('/api/state')`, `src/api.ts`), and Vite's dev server forwards every path starting with `/api` to the Go server (`vite.config.ts:24`). To the browser it is all one origin. The target comes from the `KANBAN_API` environment variable (or a git-ignored `.env.local`), so the same app can later be pointed at another backend that implements `docs/api.md`. In production (step 8) there is no proxy at all: the Go binary serves the files *and* the API.
+
+This is the same idea as a Next.js `rewrites` entry, or an API route that forwards to another service.
+
+### Why the router guards became async
+
+`requireBoard` and `requireCard` (`src/router/index.ts:15`) used to look at data that was already in memory (it came from `localStorage` synchronously). Now the data comes from a network request, so on a page refresh at `/boards/abc` the store is still empty when the router first asks "does board `abc` exist?". A synchronous guard would answer "no" and redirect to `/`, losing the deep link. An async guard can `await store.ensureLoaded()` first: vue-router waits for the returned promise before finishing the navigation. This is the same reason Next.js pages fetch in `async` server components or `loader` functions rather than rendering with empty data.
+
+`ensureLoaded` (`src/composables/useServerSync.ts:57`) caches the first load's promise, so the guards, `App.vue` and anything else can all call it and only one request is made.
+
+### Optimistic concurrency with a version number
+
+The server keeps one `version` that goes up on every write; a `PUT /api/state` must say which version it was based on. If two tabs load version 2, and tab A saves (now 3), tab B's save is based on 2 and is answered `409 Conflict` instead of silently overwriting A's work. Tab B then reloads and shows a notice (`src/composables/useServerSync.ts:84`). The Go side of this is `ReplaceState` in step 2 and `ErrConflict` mapped to 409 in step 3.
+
+### Testing against a fake server
+
+The frontend tests no longer use `localStorage`; `src/__tests__/fakeServer.ts` replaces the global `fetch` with a function that behaves like the Go server's `/api/state` (including the version check). The tests read and change its `version` and `state` to set up scenarios, such as "another tab saved first". It plays the role MSW would, with nothing to install.

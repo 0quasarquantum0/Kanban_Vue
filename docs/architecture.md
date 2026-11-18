@@ -1,6 +1,6 @@
 # Architecture
 
-_Last updated: Go step 3 (whole-state HTTP API). The Vue phases (0–9) are complete; the Go backend in `server/` is being built step by step._
+_Last updated: Go step 4 (the Vue app talks to the Go server). The Vue phases (0–9) are complete; the Go backend in `server/` is being built step by step._
 
 This file shows the project as it currently stands. It is updated at the end of every phase and only diagrams what exists. The frontend sections come first; the **Go backend** section is near the end.
 
@@ -11,7 +11,7 @@ flowchart TD
   html["index.html<br/>div#app"] --> main["src/main.ts<br/>createApp(App)"]
   main -- "app.use()" --> pinia["Pinia<br/>stores/kanban.ts"]
   main -- "app.use()" --> router["Vue Router<br/>src/router/index.ts"]
-  main -- "mount('#app')" --> app["App.vue<br/>RouterView"]
+  main -- "mount('#app')" --> app["App.vue<br/>loading / error screen, else RouterView"]
   router -. "resolves current route" .-> app
 ```
 
@@ -21,7 +21,7 @@ Solid arrows are parent → child, labelled with what is passed down (props, `v-
 
 ```mermaid
 flowchart TD
-  app["App.vue<br/>RouterView<br/>provideTheme()"]
+  app["App.vue<br/>RouterView (once the store is ready)<br/>SyncNotice<br/>provideTheme()"]
   store[("stores/kanban.ts<br/>useKanbanStore")]
 
   app -- "route /" --> list["views/BoardsListView.vue<br/>create, rename, delete boards"]
@@ -175,12 +175,20 @@ stateDiagram-v2
 
 ## Store
 
-`stores/kanban.ts` is a Pinia setup store. State is one deep ref of `KanbanState` created by VueUse's `useStorage`, so it is backed by `localStorage` (see Persistence below).
+`stores/kanban.ts` is a Pinia setup store. State is one deep ref of `KanbanState`, empty until the Go server's copy has been loaded. `composables/useServerSync.ts` (called from inside the store, its refs and functions spread into the store's return value) loads it and saves every change back (see Server sync below).
 
 ```mermaid
 classDiagram
   class useKanbanStore {
-    +state: RemovableRef~KanbanState~
+    +state: Ref~KanbanState~
+    +status: idle | loading | ready | error
+    +loadError: string | null
+    +notice: string | null
+    +version: number
+    +ensureLoaded() Promise
+    +load() Promise
+    +saveNow() Promise
+    +dismissNotice()
     +boardList: Board[]
     +columnsForBoard(boardId) Column[]
     +cardsForColumn(columnId) Card[]
@@ -204,31 +212,59 @@ classDiagram
 - `deleteColumn` also deletes the column's cards; `deleteBoard` deletes its columns the same way.
 - `moveCard` places the card at `toIndex` in the target column (clamped). It is called by the drag-and-drop composable.
 - `importState` replaces the whole state only if `isKanbanState(data)` passes, and returns whether it did.
-- Unit tests: `src/stores/__tests__/kanban.spec.ts` (`addCard`, `moveCard`, `deleteColumn`, `deleteBoard`, persistence, `importState`, `resetToDemo`).
+- Unit tests: `src/stores/__tests__/kanban.spec.ts` (`addCard`, `moveCard`, `deleteColumn`, `deleteBoard`, `importState`, `resetToDemo`) and `src/composables/__tests__/useServerSync.spec.ts` (loading, saving, conflicts). Both run against `src/__tests__/fakeServer.ts`, a stand-in for the Go server's `fetch` endpoints.
 
-## Persistence
+## Server sync
+
+The server owns the data (`docs/api.md`). The Vite dev server forwards `/api` to it; `KANBAN_API` (environment or a git-ignored `.env.local`) picks the target, default `http://localhost:8080`.
+
+```mermaid
+sequenceDiagram
+  participant App as App.vue
+  participant Guard as router guards
+  participant Store as kanban store (useServerSync)
+  participant Go as Go server (/api/state)
+
+  App->>Store: ensureLoaded()
+  Guard->>Store: await ensureLoaded()
+  Store->>Go: GET /api/state
+  Go-->>Store: { version, state }
+  Note over Store: status = ready, App renders RouterView
+  Note over Store: user edits state (deep watch, 300ms debounce)
+  Store->>Go: PUT /api/state { version, state }
+  alt version is current
+    Go-->>Store: { version: n+1 }
+  else another tab saved first
+    Go-->>Store: 409 Conflict
+    Store->>Go: GET /api/state (reload)
+    Note over Store: notice: "your change conflicted"
+  end
+```
 
 ```mermaid
 flowchart LR
-  ls[("localStorage<br/>key: kanban-state")]
+  state["store.state"]
   seed["seed.ts<br/>createSeedState()"]
   valid{{"validation.ts<br/>isKanbanState()"}}
-  state["store.state<br/>useStorage ref"]
   toolbar["BoardToolbar.vue"]
   file[/"kanban-board.json"/]
+  api["api.ts<br/>getState, putState, ApiError"]
 
-  ls -- "read once at store creation" --> state
-  seed -- "first run (key missing),<br/>invalid stored data, or reset" --> state
-  state -- "deep watch: any mutation<br/>is written back as JSON" --> ls
+  api -- "load: validated response" --> state
+  state -- "deep watch (debounced) → saveNow" --> api
+  seed -- "Reset to demo data" --> state
   state -- "Export JSON" --> toolbar --> file
   file -- "Import JSON" --> toolbar -- "importState(data)" --> valid
   valid -- "valid: replace state" --> state
   valid -. "invalid: error shown, nothing changes" .-> toolbar
 ```
 
-- `src/validation.ts` checks the shape of every entity, that each is stored under its own id, and that every referenced column and card exists and is placed only once. Tests: `src/__tests__/validation.spec.ts`.
+- `App.vue` shows "Loading…" until the first load finishes and an error screen (with a reload button) if it failed; `SyncNotice.vue` shows conflicts and save failures.
+- `useServerSync` remembers the JSON the server holds, so the state it has just loaded is never saved back, and a save with no change sends nothing. Saves never overlap: a change during a save triggers one more round afterwards.
+- `src/validation.ts` checks the shape of every entity, that each is stored under its own id, that every referenced column and card exists and is placed only once, and that no column or card is left unplaced (the server's database cannot hold orphans). Tests: `src/__tests__/validation.spec.ts`.
 - Reset asks for confirmation inline in the toolbar before calling `resetToDemo()`.
-- `vitest.config.ts` passes `--no-experimental-webstorage` so Node's own `localStorage` global doesn't hide jsdom's in tests.
+- The theme preference is the only thing still in `localStorage`. `vitest.config.ts` passes `--no-experimental-webstorage` so Node's own `localStorage` global doesn't hide jsdom's in tests.
+
 
 ## Data model
 
@@ -287,6 +323,7 @@ flowchart TD
 ```
 
 - Params reach components as props (`props` on the route), so `BoardDetailView` and `CardEditor` don't read `route.params`.
+- The guards are `async`: they `await store.ensureLoaded()` first, because the data now arrives from the server. If that load failed they let the navigation through, and `App.vue` shows the error instead of the route. Tests: `src/router/__tests__/guards.spec.ts`.
 - `beforeEnter` only runs when the route is entered, so `BoardDetailView` also renders a "no longer exists" message if its board disappears later.
 - `KanbanCard` links to `{ name: 'card', params: { cardId } }`; the router reuses `boardId` from the current location.
 
@@ -297,6 +334,12 @@ flowchart LR
   subgraph unit["Unit (no components)"]
     storeSpec["stores/__tests__/kanban.spec.ts"] --> store["stores/kanban.ts"]
     valSpec["__tests__/validation.spec.ts"] --> val["validation.ts"]
+    syncSpec["composables/__tests__/useServerSync.spec.ts"] --> store
+    guardSpec["router/__tests__/guards.spec.ts"] --> store
+    appSpec["__tests__/App.spec.ts"] --> store
+    fake["__tests__/fakeServer.ts<br/>stubs fetch like the Go server"]
+    storeSpec -. uses .-> fake
+    syncSpec -. uses .-> fake
   end
   subgraph comp["Component (@vue/test-utils)"]
     cardSpec["KanbanCard.spec.ts"] --> card["KanbanCard.vue"]
@@ -384,4 +427,4 @@ flowchart LR
 
 Nothing from the Vue plan. Optional stretch goals in `CLAUDE.md` (only if asked): a Nuxt port, touch drag and drop, undo/redo.
 
-Go backend, still to come: the Vue app calling it (step 4), SQLite (5), per-action endpoints (6), live updates (7), embedded frontend (8).
+Go backend, still to come: SQLite (5), per-action endpoints (6), live updates (7), embedded frontend (8).

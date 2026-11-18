@@ -1,12 +1,13 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import { nextTick } from 'vue'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { createSeedState } from '@/seed'
-import { STORAGE_KEY, useKanbanStore } from '../kanban'
+import { installFakeServer } from '@/__tests__/fakeServer'
+import { useKanbanStore } from '../kanban'
 
-/** A store with a new board holding two empty columns. */
-function setup() {
+/** A store that has loaded the server's demo state, with a new board holding two columns. */
+async function setup() {
   const store = useKanbanStore()
+  await store.ensureLoaded()
   const board = store.addBoard('Test board')
 
   const a = store.addColumn(board.id, 'A')
@@ -25,13 +26,17 @@ function setup() {
 
 describe('kanban store', () => {
   beforeEach(() => {
-    localStorage.clear()
+    installFakeServer()
     setActivePinia(createPinia())
   })
 
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   describe('addCard', () => {
-    it('appends a card with defaults to the column', () => {
-      const { store, a, add, titles } = setup()
+    it('appends a card with defaults to the column', async () => {
+      const { store, a, add, titles } = await setup()
       add(a.id, 'first')
       const id = add(a.id, 'second')
 
@@ -45,8 +50,8 @@ describe('kanban store', () => {
       })
     })
 
-    it('does nothing for an unknown column', () => {
-      const { store } = setup()
+    it('does nothing for an unknown column', async () => {
+      const { store } = await setup()
       const before = Object.keys(store.state.cards).length
 
       expect(store.addCard('nope', 'x')).toBeUndefined()
@@ -55,8 +60,8 @@ describe('kanban store', () => {
   })
 
   describe('moveCard', () => {
-    it('reorders within a column', () => {
-      const { store, a, add, titles } = setup()
+    it('reorders within a column', async () => {
+      const { store, a, add, titles } = await setup()
       const one = add(a.id, '1')
       add(a.id, '2')
       add(a.id, '3')
@@ -68,8 +73,8 @@ describe('kanban store', () => {
       expect(titles(a.id)).toEqual(['1', '2', '3'])
     })
 
-    it('moves between columns at the given index', () => {
-      const { store, a, b, add, titles } = setup()
+    it('moves between columns at the given index', async () => {
+      const { store, a, b, add, titles } = await setup()
       const one = add(a.id, '1')
       add(a.id, '2')
       add(b.id, 'x')
@@ -81,8 +86,8 @@ describe('kanban store', () => {
       expect(titles(b.id)).toEqual(['x', '1', 'y'])
     })
 
-    it('clamps an out-of-range index', () => {
-      const { store, a, b, add, titles } = setup()
+    it('clamps an out-of-range index', async () => {
+      const { store, a, b, add, titles } = await setup()
       const one = add(a.id, '1')
       add(b.id, 'x')
 
@@ -93,8 +98,8 @@ describe('kanban store', () => {
       expect(titles(b.id)).toEqual(['1', 'x'])
     })
 
-    it('leaves the card in place for an unknown target column', () => {
-      const { store, a, add, titles } = setup()
+    it('leaves the card in place for an unknown target column', async () => {
+      const { store, a, add, titles } = await setup()
       const one = add(a.id, '1')
 
       store.moveCard(one, 'nope', 0)
@@ -103,8 +108,8 @@ describe('kanban store', () => {
   })
 
   describe('deleteColumn', () => {
-    it('removes the column, its cards, and its place on the board', () => {
-      const { store, board, a, b, add } = setup()
+    it('removes the column, its cards, and its place on the board', async () => {
+      const { store, board, a, b, add } = await setup()
       const one = add(a.id, '1')
       const two = add(a.id, '2')
       const kept = add(b.id, 'kept')
@@ -121,8 +126,8 @@ describe('kanban store', () => {
   })
 
   describe('labelsForBoard', () => {
-    it('lists each label on the board once, sorted', () => {
-      const { store, board, a, b, add } = setup()
+    it('lists each label on the board once, sorted', async () => {
+      const { store, board, a, b, add } = await setup()
       store.updateCard(add(a.id, '1'), { labels: ['ui', 'bug'] })
       store.updateCard(add(b.id, '2'), { labels: ['bug', 'api'] })
 
@@ -131,8 +136,8 @@ describe('kanban store', () => {
   })
 
   describe('deleteBoard', () => {
-    it('removes the board with its columns and cards, and leaves other boards alone', () => {
-      const { store, board, a, b, add } = setup()
+    it('removes the board with its columns and cards, and leaves other boards alone', async () => {
+      const { store, board, a, b, add } = await setup()
       const card = add(a.id, '1')
       const seedBoardIds = store.boardList
         .filter((item) => item.id !== board.id)
@@ -149,30 +154,10 @@ describe('kanban store', () => {
     })
   })
 
-  describe('persistence', () => {
-    it('saves changes to localStorage and loads them in a fresh store', async () => {
-      const { a, add } = setup()
-      add(a.id, 'persisted')
-      await nextTick() // useStorage writes after Vue's next flush
-
-      // A new Pinia instance stands in for a page refresh.
-      setActivePinia(createPinia())
-      const reloaded = useKanbanStore()
-
-      expect(reloaded.cardsForColumn(a.id).map((card) => card.title)).toEqual(['persisted'])
-    })
-
-    it('falls back to the seed when stored data is invalid', () => {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ boards: 'nope' }))
-      const store = useKanbanStore()
-
-      expect(store.boardList.map((board) => board.title)).toEqual(['Vue Kanban'])
-    })
-  })
-
   describe('importState', () => {
-    it('replaces the state with valid data', () => {
+    it('replaces the state with valid data', async () => {
       const store = useKanbanStore()
+      await store.ensureLoaded()
       const next = createSeedState()
       const boardId = Object.keys(next.boards)[0]
 
@@ -180,8 +165,9 @@ describe('kanban store', () => {
       expect(store.boardList.map((board) => board.id)).toEqual([boardId])
     })
 
-    it('rejects invalid data and keeps the current state', () => {
+    it('rejects invalid data and keeps the current state', async () => {
       const store = useKanbanStore()
+      await store.ensureLoaded()
       const before = store.boardList.map((board) => board.id)
 
       expect(store.importState({ boards: {}, columns: {} })).toBe(false)
@@ -190,8 +176,8 @@ describe('kanban store', () => {
   })
 
   describe('resetToDemo', () => {
-    it('discards changes and restores the seed', () => {
-      const { store, a } = setup()
+    it('discards changes and restores the seed', async () => {
+      const { store, a } = await setup()
 
       store.resetToDemo()
 

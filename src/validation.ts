@@ -48,15 +48,23 @@ function isEntityRecord<T extends { id: string }>(
   )
 }
 
-/** Every id exists in `entities`, and no id is referenced twice. */
+/**
+ * Every id exists in `entities`, no id is referenced twice, and every entity is referenced.
+ * The last rule matches the server, whose database cannot hold a column without a board or a
+ * card without a column.
+ */
 function referencesAreValid(ids: string[], entities: Record<string, unknown>): boolean {
   const known = new Set(Object.keys(entities))
-  return new Set(ids).size === ids.length && ids.every((id) => known.has(id))
+  return (
+    new Set(ids).size === ids.length &&
+    ids.length === known.size &&
+    ids.every((id) => known.has(id))
+  )
 }
 
 /**
  * Checks shape and referential integrity: every column on a board and every card in a
- * column must exist, and each can only be placed once.
+ * column must exist, each can only be placed once, and none can be left unplaced.
  */
 export function isKanbanState(value: unknown): value is KanbanState {
   if (!isRecord(value)) return false

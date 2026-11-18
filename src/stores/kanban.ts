@@ -1,20 +1,16 @@
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { useStorage } from '@vueuse/core'
+import { useServerSync } from '@/composables/useServerSync'
 import { createSeedState } from '@/seed'
 import type { Board, Card, CardPatch, Column, ID, KanbanState } from '@/types'
 import { isKanbanState } from '@/validation'
 
-export const STORAGE_KEY = 'kanban-state'
-
 export const useKanbanStore = defineStore('kanban', () => {
   // --- state ---
-  // A ref backed by localStorage. If the key is missing (first run) the seed is used and
-  // saved; after that, every change to the ref, however deep, is written back as JSON.
-  const state = useStorage<KanbanState>(STORAGE_KEY, createSeedState)
-
-  // Stored data can be stale or hand-edited. Start over if it no longer fits the model.
-  if (!isKanbanState(state.value)) state.value = createSeedState()
+  // Empty until the first load from the Go server finishes (see useServerSync). Every change
+  // to the ref, however deep, is then saved back to the server.
+  const state = ref<KanbanState>({ boards: {}, columns: {}, cards: {} })
+  const sync = useServerSync(state)
 
   // --- getters ---
   const boardList = computed<Board[]>(() => Object.values(state.value.boards))
@@ -148,6 +144,7 @@ export const useKanbanStore = defineStore('kanban', () => {
 
   return {
     state,
+    ...sync,
     boardList,
     columnsForBoard,
     cardsForColumn,

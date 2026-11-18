@@ -56,6 +56,22 @@ describe('isKanbanState', () => {
     expect(isKanbanState(state)).toBe(false)
   })
 
+  it('rejects a column that no board lists', () => {
+    const state = seed()
+    const board = Object.values(state.boards)[0]
+    if (!board) throw new Error('seed has no board')
+    board.columnIds.pop()
+
+    expect(isKanbanState(state)).toBe(false)
+  })
+
+  it('rejects a card that no column lists', () => {
+    const state = seed()
+    firstColumn(state).cardIds.pop()
+
+    expect(isKanbanState(state)).toBe(false)
+  })
+
   it('rejects a card placed in two columns', () => {
     const state = seed()
     const [first, second] = Object.values(state.columns)

@@ -4,14 +4,33 @@
     {
       "name": "dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 5173
     },
     {
       "name": "preview",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "preview"],
+      "runtimeArgs": [
+        "run",
+        "preview"
+      ],
       "port": 4173
+    },
+    {
+      "name": "go-api",
+      "runtimeExecutable": "go",
+      "runtimeArgs": [
+        "-C",
+        "server",
+        "run",
+        "./cmd/kanban",
+        "-addr",
+        ":8081"
+      ],
+      "port": 8081
     }
   ]
 }
