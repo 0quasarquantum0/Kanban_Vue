@@ -40,3 +40,11 @@ __screenshots__/
 
 # Graphify output (local; rebuild with `graphify update .`, no model needed)
 graphify-out/
+
+# Go backend
+server/kanban.db
+server/kanban.db-*
+server/*.exe
+server/*.test
+server/web/dist/*
+!server/web/dist/.gitkeep
