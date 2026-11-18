@@ -1,8 +1,8 @@
 # Architecture
 
-_Last updated: Go step 8 (one binary). The Vue phases (0–9) are complete; the Go backend in `server/` is being built step by step._
+_Last updated: Go step 9 (finish). The Vue phases (0–9) and the Go backend steps (0–9) are complete._
 
-This file shows the project as it currently stands. It is updated at the end of every phase and only diagrams what exists. The frontend sections come first; the **Go backend** section is near the end.
+This file shows the project as it currently stands. It is updated at the end of every phase and only diagrams what exists. The frontend sections come first; the **Go backend** section is near the end. Read [`api.md`](api.md) for the HTTP contract between the two.
 
 ## App bootstrap
 
@@ -513,6 +513,6 @@ flowchart LR
 
 ## Not built yet
 
-Nothing from the Vue plan. Optional stretch goals in `CLAUDE.md` (only if asked): a Nuxt port, touch drag and drop, undo/redo.
+Nothing from either plan. Optional follow-ups, only if asked: a Nuxt port, touch drag and drop, undo/redo (frontend); a Ruby implementation of `api.md` in `server-ruby/`, a Rust `grep` clone, a Go/Rust/Ruby comparison exercise (see `README.md`).
 
-Go backend: all planned steps are built (step 9 finishes the docs).
+Known gaps in the backend, by design: no authentication, no accounts, and no retry queue for working offline (a failed request reloads the server's state and shows a notice).

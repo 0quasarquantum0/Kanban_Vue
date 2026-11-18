@@ -2,19 +2,34 @@
 
 Each entry says what a Go concept is, how it compares to TypeScript (or Vue/React), and where to see it in this code. Entries are grouped by the step that first used them. Read them in order; later steps assume the earlier ones.
 
+## Start here
+
+If you only have an hour, read these entries, in this order. Each one is a Go idea you will meet in almost every Go program, and each is tied to code you already know from the Vue app.
+
+1. **Step 1: Errors as values** and **Structs and JSON tags**. How Go models data and reports failure (instead of `interface` and `throw`).
+2. **Step 2: Interfaces are satisfied implicitly** and **Why a mutex, and `defer`**. How `Store` has two implementations that share one set of tests, and why concurrency changes how you write a store.
+3. **Step 3: `http.Handler`, middleware, and decoding JSON safely**. What an HTTP server is made of, compared with Express and Next.js route handlers.
+4. **Step 5: Transactions and `defer tx.Rollback()`**. The idiom you will copy most often.
+5. **Step 7: Goroutines, channels and `select`**. The part of Go that has no TypeScript equivalent.
+6. **Step 8: `embed.FS` and cross-compiling**. Why a Go service is "one file".
+
+Then do the [exercises](#exercises) at the end and the quiz in `QUIZ.md`.
+
+The step-by-step entries below are the reference; each says where in the code its idea is used. The `Step 4` entry is about the Vue side only.
+
 ## Step 0 — Module and first server
 
 ### Modules and packages
 
-A **module** is a project with a `go.mod` file (like `package.json`, but with no scripts or dev-dependencies: just the module path, the Go version and required modules). A **package** is one directory of `.go` files that share a `package x` line (like an ES module, except the unit is the whole folder, not one file). Every file in a folder is in the same package and sees all the others' names without importing them. You import a package by its full path: `github.com/bqua0007/kanban-server/internal/api`. The path need not exist online; it is only a unique name. See `go.mod:1` and the import block at `cmd/kanban/main.go:11`.
+A **module** is a project with a `go.mod` file (like `package.json`, but with no scripts or dev-dependencies: just the module path, the Go version and required modules). A **package** is one directory of `.go` files that share a `package x` line (like an ES module, except the unit is the whole folder, not one file). Every file in a folder is in the same package and sees all the others' names without importing them. You import a package by its full path: `github.com/bqua0007/kanban-server/internal/api`. The path need not exist online; it is only a unique name. See `go.mod:1` and the import block at `cmd/kanban/main.go:18`.
 
 ### `package main` and `func main`
 
-A package called `main` builds an executable; any other package is a library. The program starts at `func main()` in package `main`, with no framework, no `createApp(...).mount()`: you build the server and start it yourself. `cmd/kanban/main.go:14` is the whole entry point. The `cmd/<name>/` layout is a convention that lets one module hold several programs.
+A package called `main` builds an executable; any other package is a library. The program starts at `func main()` in package `main`, with no framework, no `createApp(...).mount()`: you build the server and start it yourself. `cmd/kanban/main.go:23` is the whole entry point. The `cmd/<name>/` layout is a convention that lets one module hold several programs.
 
 ### Exported vs unexported names
 
-There is no `export` keyword. A name that starts with a capital letter (`NewHandler`) is visible to other packages; lowercase (`health`) is private to its own package. This applies to functions, types, struct fields and methods. Compare `api.NewHandler` at `internal/api/server.go:10` with the private `health` just below it.
+There is no `export` keyword. A name that starts with a capital letter (`New`) is visible to other packages; lowercase (`health`) is private to its own package. This applies to functions, types, struct fields and methods. Compare `api.New` at `internal/api/server.go:26` with the private `health` method just below `Handler`.
 
 ### `internal/`
 
@@ -22,7 +37,7 @@ A directory named `internal` is enforced by the compiler: only code inside the p
 
 ### `http.Handler`, `ServeMux` and method patterns
 
-An `http.Handler` is anything with a `ServeHTTP(w, r)` method. `http.ServeMux` is the router (compare Vue Router's route table). Since Go 1.22 a pattern can include the method and path wildcards: `"GET /api/health"`. A request to that path with another method gets `405 Method Not Allowed` for free, which the second test checks. See `internal/api/server.go:12`. (Step 3 goes deeper.)
+An `http.Handler` is anything with a `ServeHTTP(w, r)` method. `http.ServeMux` is the router (compare Vue Router's route table). Since Go 1.22 a pattern can include the method and path wildcards: `"GET /api/health"`. A request to that path with another method gets `405 Method Not Allowed` for free, which the second test checks. See `internal/api/server.go:39`. (Step 3 goes deeper.)
 
 ### `go run` vs `go build`, and the toolchain
 
@@ -37,17 +52,17 @@ An `http.Handler` is anything with a `ServeHTTP(w, r)` method. `http.ServeMux` i
 
 ### Tests live next to the code
 
-A test is a function `func TestXxx(t *testing.T)` in a file ending in `_test.go`. There is no `describe`/`it`/`expect`: you write plain Go and call `t.Errorf` (report and continue) or `t.Fatalf` (report and stop). `package api_test` (with the `_test` suffix) makes this an *external* test: it can only use what `api` exports, just like a real client. See `internal/api/server_test.go:12`.
+A test is a function `func TestXxx(t *testing.T)` in a file ending in `_test.go`. There is no `describe`/`it`/`expect`: you write plain Go and call `t.Errorf` (report and continue) or `t.Fatalf` (report and stop). `package api_test` (with the `_test` suffix) makes this an *external* test: it can only use what `api` exports, just like a real client. See `internal/api/server_test.go:87`.
 
 `httptest.NewRecorder()` stands in for the network: `handler.ServeHTTP(rec, req)` runs the handler in memory and `rec` captures the response, so the test needs no open port.
 
 ### Errors you may not ignore
 
-`json.NewEncoder(w).Encode(...)` returns an `error`. Go has no exceptions for ordinary failures: functions return errors as values and the caller decides. Writing `_ =` says "I am deliberately ignoring this", and the project rule is to add a comment explaining why (`internal/api/server.go:19`). More in step 1.
+`w.Write(...)` (writing the response body) returns an `error`. Go has no exceptions for ordinary failures: functions return errors as values and the caller decides. Writing `_ =` says "I am deliberately ignoring this", and the project rule is to add a comment explaining why (`internal/api/json.go:32`). More in step 1.
 
 ### The `-addr` flag
 
-`flag` is the standard library's command-line parser: `flag.String("addr", ":8080", "usage")` returns a `*string` (a pointer, filled in by `flag.Parse()`), so you read it as `*addr`. See `cmd/kanban/main.go:15`. A bare `:8080` means "all interfaces, port 8080".
+`flag` is the standard library's command-line parser: `flag.String("addr", ":8080", "usage")` returns a `*string` (a pointer, filled in by `flag.Parse()`), so you read it as `*addr`. See `cmd/kanban/main.go:24`. A bare `:8080` means "all interfaces, port 8080".
 
 ## Step 1 — Types, seed and validation
 
@@ -57,7 +72,7 @@ A `struct` is Go's record type: a fixed list of named, typed fields. Where TypeS
 
 ### Maps, slices and `nil`
 
-`Record<ID, Card>` becomes `map[string]Card`; `string[]` becomes `[]string` (a *slice*: a growable view over an array). Reading a missing map key returns the zero value, and `card, ok := cards[id]` tells you whether it was there. Two traps matter here. A `nil` slice encodes to JSON `null`, not `[]`, so the seed always creates labels as `[]string{}` or a literal list. And a `nil` map is readable but panics on write, so `NewSeedState` makes its maps with `map[string]Card{}` (`internal/kanban/seed.go:64`). Validation uses the nil/empty difference on purpose: a field missing from the JSON stays `nil`, `[]` becomes an empty non-nil slice (`internal/kanban/validate.go:30`).
+`Record<ID, Card>` becomes `map[string]Card`; `string[]` becomes `[]string` (a *slice*: a growable view over an array). Reading a missing map key returns the zero value, and `card, ok := cards[id]` tells you whether it was there. Two traps matter here. A `nil` slice encodes to JSON `null`, not `[]`, so the seed always creates labels as `[]string{}` or a literal list. And a `nil` map is readable but panics on write, so `NewSeedState` makes its maps with `map[string]Card{}` (`internal/kanban/seed.go:64`). Validation uses the nil/empty difference on purpose: a field missing from the JSON stays `nil`, `[]` becomes an empty non-nil slice (`internal/kanban/validate.go:52`).
 
 ### Pointers, only for `null`
 
@@ -85,7 +100,7 @@ A type can take over its own JSON by implementing `MarshalJSON` / `UnmarshalJSON
 
 When many cases share the same steps, Go tests put the cases in a slice of structs and loop over it, calling `t.Run(name, func(t *testing.T) {...})` so each case reports separately, like `it.each` in Vitest. See `internal/kanban/validate_test.go:44`, whose rows are the ported cases from `src/__tests__/validation.spec.ts`. Test names are sentences, so a failure reads `TestValidateRejectsBrokenReferences/rejects_a_card_placed_in_two_columns`.
 
-Helpers call `t.Helper()` so a failure points at the calling test line, not the helper (`internal/kanban/validate_test.go:11`). The `for range 1000` in `internal/kanban/id_test.go:24` is Go 1.22's range-over-integer.
+Helpers call `t.Helper()` so a failure points at the calling test line, not the helper (`internal/kanban/validate_test.go:12`). The `for range 1000` in `internal/kanban/id_test.go:24` is Go 1.22's range-over-integer.
 
 ### `package kanban` tests vs `package kanban_test`
 
@@ -151,11 +166,11 @@ Every `Store` method takes `ctx context.Context` first. A context carries cancel
 
 Everything that answers HTTP is an `http.Handler`: a value with `ServeHTTP(w http.ResponseWriter, r *http.Request)`. `http.HandlerFunc` is an adapter type that turns a plain function with that signature into a `Handler`, so you rarely write the method yourself (`internal/api/middleware.go:41`). Handlers write to `w` (status, headers, body) and read from `r`; there is no `return` value and no `res.json()` helper: `writeJSON` in `internal/api/json.go:22` is our own. Compare an Express handler `(req, res) => ...` or a Next.js route handler that returns a `Response`.
 
-`ServeMux` is the router. The pattern `"PUT /api/state"` (`internal/api/server.go:27`) matches a method and a path; wildcards like `{boardId}` come in step 6 and are read with `r.PathValue("boardId")`. It is the equivalent of Vue Router's route table, except it is plain code, not a file layout (compare Next.js's file-based routes).
+`ServeMux` is the router. The pattern `"PUT /api/state"` (`internal/api/server.go:41`) matches a method and a path; wildcards like `{boardId}` come in step 6 and are read with `r.PathValue("boardId")`. It is the equivalent of Vue Router's route table, except it is plain code, not a file layout (compare Next.js's file-based routes).
 
 ### A server value with methods instead of globals
 
-`Server` (`internal/api/server.go:12`) holds the dependencies (`store`, `log`) and the handlers are methods on it: `s.getState` is a *method value*, a function already bound to `s`. This is dependency injection with no framework: the constructor `New` takes what the server needs, and tests pass a fake. See `failingStore` in `internal/api/server_test.go:40`.
+`Server` (`internal/api/server.go:15`) holds the dependencies (`store`, `log`) and the handlers are methods on it: `s.getState` is a *method value*, a function already bound to `s`. This is dependency injection with no framework: the constructor `New` takes what the server needs, and tests pass a fake. See `failingStore` in `internal/api/server_test.go:40`.
 
 ### Embedding
 
@@ -191,7 +206,7 @@ In `putState` (`internal/api/state.go:24`) `Version` is `*int64`. If the client 
 
 ### Process wiring in `main`
 
-`run` in `cmd/kanban/main.go:30` returns an error to `main`, which logs it and exits with status 1. Calling `os.Exit` deep inside would skip `defer`s; the pattern "`main` calls `run`, `run` returns an error" is the idiomatic way to keep `main` tiny and testable.
+`run` in `cmd/kanban/main.go:50` returns an error to `main`, which logs it and exits with status 1. Calling `os.Exit` deep inside would skip `defer`s; the pattern "`main` calls `run`, `run` returns an error" is the idiomatic way to keep `main` tiny and testable.
 
 ## Step 4 — Connect the Vue app
 
@@ -207,11 +222,11 @@ This is the same idea as a Next.js `rewrites` entry, or an API route that forwar
 
 `requireBoard` and `requireCard` (`src/router/index.ts:15`) used to look at data that was already in memory (it came from `localStorage` synchronously). Now the data comes from a network request, so on a page refresh at `/boards/abc` the store is still empty when the router first asks "does board `abc` exist?". A synchronous guard would answer "no" and redirect to `/`, losing the deep link. An async guard can `await store.ensureLoaded()` first: vue-router waits for the returned promise before finishing the navigation. This is the same reason Next.js pages fetch in `async` server components or `loader` functions rather than rendering with empty data.
 
-`ensureLoaded` (`src/composables/useServerSync.ts:57`) caches the first load's promise, so the guards, `App.vue` and anything else can all call it and only one request is made.
+`ensureLoaded` (`src/composables/useServerSync.ts:73`) caches the first load's promise, so the guards, `App.vue` and anything else can all call it and only one request is made.
 
 ### Optimistic concurrency with a version number
 
-The server keeps one `version` that goes up on every write; a `PUT /api/state` must say which version it was based on. If two tabs load version 2, and tab A saves (now 3), tab B's save is based on 2 and is answered `409 Conflict` instead of silently overwriting A's work. Tab B then reloads and shows a notice (`src/composables/useServerSync.ts:84`). The Go side of this is `ReplaceState` in step 2 and `ErrConflict` mapped to 409 in step 3.
+The server keeps one `version` that goes up on every write; a `PUT /api/state` must say which version it was based on. If two tabs load version 2, and tab A saves (now 3), tab B's save is based on 2 and is answered `409 Conflict` instead of silently overwriting A's work. Tab B then reloads and shows a notice (`src/composables/useServerSync.ts:140`). The Go side of this is `ReplaceState` in step 2 and `ErrConflict` mapped to 409 in step 3.
 
 ### Testing against a fake server
 
@@ -221,7 +236,7 @@ The frontend tests no longer use `localStorage`; `src/__tests__/fakeServer.ts` r
 
 ### `database/sql`: a pool, not a connection
 
-`sql.DB` (`internal/kanban/sqlite.go:20`) is not one connection but a **pool** of them, safe to share between goroutines, so you open it once and keep it. You rarely touch connections yourself: `db.ExecContext` runs a statement that returns no rows, `db.QueryContext` returns rows you loop over, `db.QueryRowContext` returns at most one. `database/sql` is only an interface; the actual SQLite code lives in a *driver* that registers itself. It is closer to `pg` or `better-sqlite3` than to an ORM such as Prisma: you write SQL and map the columns yourself.
+`sql.DB` (`internal/kanban/sqlite.go:19`) is not one connection but a **pool** of them, safe to share between goroutines, so you open it once and keep it. You rarely touch connections yourself: `db.ExecContext` runs a statement that returns no rows, `db.QueryContext` returns rows you loop over, `db.QueryRowContext` returns at most one. `database/sql` is only an interface; the actual SQLite code lives in a *driver* that registers itself. It is closer to `pg` or `better-sqlite3` than to an ORM such as Prisma: you write SQL and map the columns yourself.
 
 `db.SetMaxOpenConns(1)` (`internal/kanban/sqlite.go:44`) limits the pool to one connection, so every query takes its turn. For a small app on SQLite, that is simpler and safer than juggling locks.
 
@@ -237,7 +252,7 @@ A transaction groups statements so they all happen or none do. `transact` (`inte
 
 ### Higher-order functions in Go
 
-`transact(ctx, func(tx *sql.Tx) error {...})` takes a function as an argument, like a callback in JavaScript. The caller writes only the interesting part; `transact` owns begin, version bump, commit and rollback, so no method can forget one. Closures are how results get out: `AddBoard` assigns to a `board` variable declared outside the function it passes in (`internal/kanban/sqlite.go:274`).
+`transact(ctx, func(tx *sql.Tx) error {...})` takes a function as an argument, like a callback in JavaScript. The caller writes only the interesting part; `transact` owns begin, version bump, commit and rollback, so no method can forget one. Closures are how results get out: `AddBoard` assigns to a `board` variable declared outside the function it passes in (`internal/kanban/sqlite.go:271`).
 
 ### `embed` and migrations
 
@@ -259,7 +274,7 @@ The migration runner records applied files in a `schema_migrations` table, so ea
 
 ### Reading the `-db` flag
 
-`flag.String("db", "kanban.db", ...)` (`cmd/kanban/main.go:19`) gives the database path. The file `kanban.db` (plus `-wal` and `-shm` files, because the connection uses write-ahead logging) is created in the directory where you run the server, and is git-ignored.
+`flag.String("db", "kanban.db", ...)` (`cmd/kanban/main.go:25`) gives the database path. The file `kanban.db` (plus `-wal` and `-shm` files, because the connection uses write-ahead logging) is created in the directory where you run the server, and is git-ignored.
 
 ## Step 6 — Per-action endpoints
 
@@ -289,7 +304,7 @@ The frontend wants to show a new card *before* the server answers, so it needs t
 
 Each Pinia action now changes `state` first, so the screen updates instantly, then queues one request (`src/stores/kanban.ts:145` shows `moveCard`). You already know this pattern from drag and drop, where the card jumps before anything is saved. Two things make it safe:
 
-- **Order.** `useServerSync` keeps a promise chain (`tail`, `src/composables/useServerSync.ts:141`) so requests run one at a time in the order they were made; otherwise `updateCard` could reach the server before the `addCard` that creates the card. This is the JavaScript counterpart of what a goroutine and a channel do in step 7.
+- **Order.** `useServerSync` keeps a promise chain (`tail`, `src/composables/useServerSync.ts:168`) so requests run one at a time in the order they were made; otherwise `updateCard` could reach the server before the `addCard` that creates the card. This is the JavaScript counterpart of what a goroutine and a channel do in step 7.
 - **Failure.** If any request fails, the ones queued behind it are skipped (they were built on state that never reached the server), and `recover` reloads the whole state, which undoes the optimistic change. The user is told in a notice.
 
 Note that `deleteBoard` removes the columns and cards locally but sends *one* `DELETE`: the server's `ON DELETE CASCADE` (step 5) does the rest.
@@ -310,7 +325,7 @@ A handler that streams must **flush** after every write, or Go buffers the bytes
 
 ### Goroutines
 
-A **goroutine** is a function running concurrently with the rest of the program, started with the `go` keyword (`go hub.Run(ctx)`, `internal/api/server.go:27`). It is not an OS thread: a goroutine costs a few kilobytes, so a server with ten thousand open streams just has ten thousand goroutines. Each HTTP request already runs in its own goroutine, which is why the store needed a mutex in step 2, and why each open `/api/events` connection simply *blocks* inside its handler for as long as the browser tab lives. The JavaScript equivalent of that is awkward: the browser's event loop has one thread, and long-lived work is written as callbacks or `async`/`await`, so "wait for something" must never block. In Go, blocking is normal and cheap; the runtime runs other goroutines meanwhile.
+A **goroutine** is a function running concurrently with the rest of the program, started with the `go` keyword (`go hub.Run(ctx)`, `internal/api/server.go:29`). It is not an OS thread: a goroutine costs a few kilobytes, so a server with ten thousand open streams just has ten thousand goroutines. Each HTTP request already runs in its own goroutine, which is why the store needed a mutex in step 2, and why each open `/api/events` connection simply *blocks* inside its handler for as long as the browser tab lives. The JavaScript equivalent of that is awkward: the browser's event loop has one thread, and long-lived work is written as callbacks or `async`/`await`, so "wait for something" must never block. In Go, blocking is normal and cheap; the runtime runs other goroutines meanwhile.
 
 ### Channels
 
@@ -328,7 +343,7 @@ Compare the Vue app: a Pinia store is also "one owner of the state, changed thro
 
 ### `context` cancellation
 
-`r.Context()` is cancelled the moment the client disconnects, so the handler's `select` has a `case <-r.Context().Done()` (`internal/api/events.go:53`) and returns, which runs the `defer cancel()` that unsubscribes. Nobody calls "on close" by hand. The hub itself stops when the context passed to `Run` is cancelled (`Server.Close`, `internal/api/server.go:32`), and it then closes every subscriber's channel, which ends every open stream. Context cancellation is Go's equivalent of `AbortController`, and it travels down through every function that takes a `ctx`, including database calls.
+`r.Context()` is cancelled the moment the client disconnects, so the handler's `select` has a `case <-r.Context().Done()` (`internal/api/events.go:53`) and returns, which runs the `defer cancel()` that unsubscribes. Nobody calls "on close" by hand. The hub itself stops when the context passed to `Run` is cancelled (`Server.Close`, `internal/api/server.go:34`), and it then closes every subscriber's channel, which ends every open stream. Context cancellation is Go's equivalent of `AbortController`, and it travels down through every function that takes a `ctx`, including database calls.
 
 ### Closing channels, and `sync.Once`
 
@@ -380,3 +395,57 @@ cd server
 go build -o kanban.exe ./cmd/kanban
 ./kanban.exe -addr :8080 -db kanban.db   # open http://localhost:8080 and refresh on any page
 ```
+
+## Exercises
+
+Three small pieces to delete and write again yourself. Each has tests that already exist and tell you when you are right. The method: read the code and its tests once, commit or stash so you can get back, delete the function body, and write it from the tests and the comments. Do not look at `git show` until your tests pass.
+
+### 1. The move-card SQL (`SQLite.MoveCard`)
+
+**File:** `internal/kanban/sqlite.go`, the body of `MoveCard` (keep the signature and the doc comment).
+
+**The job:** inside one transaction, take the card out of its column (closing the gap in the positions that follow it), clamp the target index to the target column *without* the moving card, open a gap there, and put the card in. Missing card or column must return an error matching `ErrNotFound` (`notFound(...)`).
+
+**Tests that tell you:**
+
+```bash
+go test ./internal/kanban -run 'TestSQLite' -v
+```
+
+`TestSQLiteStore` contains the same "MoveCard ..." cases as the in-memory store (reorder, move between columns, clamping, unknown IDs), and `TestSQLiteKeepsPositionsDense` fails if you leave a hole or a duplicate in the `position` numbers.
+
+**Hint:** moving a card within its own column is the trap: after you close the gap, the card's own row is still counted unless you leave it out of the count and the shift (`id <> ?`).
+
+### 2. The SSE hub (`Hub.Run`)
+
+**File:** `internal/api/hub.go`, the body of `Run` (keep the struct, `NewHub`, `Subscribe`, `Publish`, `subscriberCount`).
+
+**The job:** one goroutine, one `for { select { ... } }`, owning a `map` of subscribers. Handle: the context being cancelled (close every subscriber's channel and return), a new subscriber, an unsubscribe, a published version (send to every subscriber without ever blocking; drop and close any whose buffer is full), and the `count` request used by tests. `Run` must close `h.stopped` when it returns.
+
+**Tests that tell you:**
+
+```bash
+go test ./internal/api -run 'TestHub|TestEvents|TestADisconnected' -v
+```
+
+**Hint:** never `close` a subscriber's channel twice; `delete` from the map first, and only close channels that were in the map.
+
+### 3. Validation (`Validate`)
+
+**File:** `internal/kanban/validate.go`, the whole of `Validate` (and `checkReferences` if you want).
+
+**The job:** return an error (made with `invalidf`) saying what is wrong with a state: nil sections, an entity stored under the wrong key, missing slices, a board listing a column that does not exist, anything listed twice, any column no board lists, any card no column lists. Valid states, including the empty one, return `nil`.
+
+**Tests that tell you:**
+
+```bash
+go test ./internal/kanban -run 'TestValidate|TestSeed|TestStateJSON' -v
+```
+
+Also run `go test ./...` at the end: the HTTP tests send bad states to `PUT /api/state` and expect a 400 with a useful message.
+
+**Hint:** sort the map keys (`slices.Sorted(maps.Keys(m))`) so the *first* error you report is the same on every run; Go randomises map iteration order on purpose.
+
+### When you have finished
+
+If all three pass, try one thing that was not in the plan: add a `description` length limit of 2000 characters to `CardPatch.apply`. Write the failing test first (it belongs in `internal/kanban/store_suite_test.go`, so both stores are tested), then the code, then add the rule to `docs/api.md`.
