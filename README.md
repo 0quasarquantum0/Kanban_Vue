@@ -2,6 +2,8 @@
 
 A Kanban board built with Vue 3 as a learning project, by a developer coming from React and Next.js. It was built in phases, each one introducing a group of Vue features. The app works; the comments and this README are aimed at understanding *how Vue does things*.
 
+The next project is a **Go backend** for this app, planned in [Part 2](#part-2-go-backend-planned) below.
+
 Features: multiple boards, columns and cards; drag and drop (with a keyboard alternative); animated moves; a card editor in a modal with its own URL; search and label filters in the URL; `localStorage` persistence with JSON import/export; light and dark themes; keyboard shortcuts.
 
 ## Running it
@@ -79,4 +81,45 @@ Each phase is one commit (`git log --oneline`), so you can check out any phase t
 - Drag and drop is mouse-only (no touch) and was not tested in Firefox. Use **Move to…** on touch devices.
 - Deleting a card or column from the keyboard leaves focus at the top of the page.
 - The browser's Back button closes the card editor without its leave animation.
-- Data lives in one browser's `localStorage`; use Export JSON to move it elsewhere.
+- Data lives in one browser's `localStorage`; use Export JSON to move it elsewhere. Part 2 replaces this with a server.
+
+## Part 2: Go backend (planned)
+
+The second learning project replaces `localStorage` with a Go API that this app talks to. Go was picked first because it builds directly on this app and is the gentlest of the languages considered (Go, Rust, Ruby).
+
+The full instructions, which a Claude Code session loads on its own, are in [`server/CLAUDE.md`](server/CLAUDE.md). It runs differently from the Vue project:
+
+- **All steps in one go.** No pause between steps, but a commit at the end of each one (`go step 3: ...`), with every commit passing its checks.
+- **Tests first**, so the tests explain what the code is meant to do.
+- **Go concepts are explained in `server/LEARNING.md`** as they first appear, compared with TypeScript, instead of in chat.
+- **Standard library only**, plus one SQLite driver.
+
+### Before you start
+
+1. Install Go from https://go.dev/dl/ (1.22 or newer), and check with `go version`.
+2. Start a new Claude Code session in this folder and ask it to build the Go backend following `server/CLAUDE.md`.
+
+### Steps
+
+| Step | Built | Go concepts | Closest TypeScript / Vue equivalent |
+|---|---|---|---|
+| 0. Module and first server | `server/` module, `GET /api/health` | Modules and packages, `func main`, exported names by capitalisation, the `go` toolchain | `package.json`, `export`, ESLint + Prettier + Vitest in one tool |
+| 1. Types and validation | Structs for boards, columns and cards; seed data; validation | Structs and JSON tags, maps and slices, pointers for `null`, errors as values, table-driven tests | `types.ts`, `validation.ts`, `it.each` |
+| 2. In-memory store | Every board operation, with the store tests ported | Methods, implicit interfaces, `sync.Mutex`, `defer` | The Pinia store, TS structural typing |
+| 3. Whole-state API | `GET`/`PUT /api/state` with version checks | `net/http` handlers, `ServeMux` patterns, middleware, JSON decoding | Vue Router's route table, Express-style middleware |
+| 4. Connect the Vue app | Vite proxy; the store loads and saves through the API | (Vue side) async route guards, `fetch` instead of `useStorage` | Phase 5's deep watch, with a server behind it |
+| 5. SQLite | Tables with cascading deletes, embedded migrations | `database/sql`, transactions, `embed`, one interface with two implementations | An ORM, without the ORM |
+| 6. Per-action endpoints | REST endpoints for each store action, optimistic updates | Resource design, `PATCH` vs `PUT`, status codes | The store actions from phase 2 |
+| 7. Live updates | Changes appear in other tabs without a refresh | Goroutines, channels, `select`, `context` cancellation | The event loop and `async`/`await`; `EventSource` |
+| 8. One binary | The Go executable serves the API and the built Vue app | `embed.FS`, flags, graceful shutdown, cross-compiling | `vite preview` and a Node server, in one file |
+| 9. Finish | READMEs, `LEARNING.md` exercises, `QUIZ.md` | (Review) | Phase 9 |
+
+The API is written down language-neutrally in `docs/api.md` as it is built, so another backend can implement the same contract later.
+
+### Afterwards: the other languages
+
+These are options for later sessions, not part of the Go plan.
+
+- **Ruby (Sinatra or Rails):** the same API in `server-ruby/`, implementing `docs/api.md`. The Vue app switches to it by changing one environment variable (`KANBAN_API`), which makes the trade-off visible: Rails gets there faster, while Go gives more speed and explicit control.
+- **Rust (a small `grep` clone):** a standalone command-line tool with regex search, recursive directory walking, coloured output and flags like `--ignore-case`. It doesn't connect to this app, so it gets its own folder. It's the hardest of the three, which is why it comes after Go.
+- **Comparison exercise:** the same small program (a word-frequency counter or a CSV summariser) in Go, Rust and Ruby, to compare syntax, error handling and speed side by side.

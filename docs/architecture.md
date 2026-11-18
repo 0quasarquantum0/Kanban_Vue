@@ -315,3 +315,5 @@ flowchart LR
 ## Not built yet
 
 Nothing from the plan. Optional stretch goals in `CLAUDE.md` (only if asked): a Nuxt port, touch drag and drop, undo/redo.
+
+A Go backend is planned in `server/CLAUDE.md` (not started). Its diagrams will be added here as it is built.

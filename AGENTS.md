@@ -6,6 +6,8 @@ This is a **learning project**. The developer is experienced with React and Next
 
 Build in the phases below, in order. Each phase teaches specific Vue features.
 
+**Status:** the Vue phases (0–9) are complete. The next project is a Go backend in `server/`. Before any backend work, read `server/CLAUDE.md`. Its working agreement (all steps in one go, with a commit per step) replaces "One phase at a time" below for that work. Frontend changes made for the backend still follow this file's Vue conventions.
+
 ## Working agreement (read first)
 
 - **One phase at a time.** Finish a phase, make sure `npm run dev` runs without errors and `npm run type-check` passes, then stop. Summarise what was built and wait for the developer to say "next" before starting the next phase.

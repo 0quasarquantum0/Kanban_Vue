@@ -37,3 +37,6 @@ __screenshots__/
 
 # Vite
 *.timestamp-*-*.mjs
+
+# Graphify output (local; rebuild with `graphify update .`, no model needed)
+graphify-out/
