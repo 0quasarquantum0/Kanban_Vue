@@ -32,7 +32,9 @@ func newHandlerWithStore(t *testing.T) (http.Handler, kanban.Store) {
 // newHandlerOn returns the API handler on top of the given store, with logging off.
 func newHandlerOn(t *testing.T, store kanban.Store) http.Handler {
 	t.Helper()
-	return api.New(store, slog.New(slog.DiscardHandler)).Handler()
+	srv := api.New(store, slog.New(slog.DiscardHandler))
+	t.Cleanup(srv.Close)
+	return srv.Handler()
 }
 
 // failingStore is a Store whose Snapshot always fails. Embedding the Store interface gives it
@@ -116,7 +118,9 @@ func TestRoutingErrorsAreJSON(t *testing.T) {
 
 func TestRequestsAreLogged(t *testing.T) {
 	var logs bytes.Buffer
-	handler := api.New(kanban.NewMemory(), slog.New(slog.NewTextHandler(&logs, nil))).Handler()
+	srv := api.New(kanban.NewMemory(), slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(srv.Close)
+	handler := srv.Handler()
 
 	do(t, handler, http.MethodGet, "/api/health", "")
 

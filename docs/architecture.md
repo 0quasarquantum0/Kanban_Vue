@@ -1,6 +1,6 @@
 # Architecture
 
-_Last updated: Go step 6 (per-action endpoints). The Vue phases (0–9) are complete; the Go backend in `server/` is being built step by step._
+_Last updated: Go step 7 (live updates with server-sent events). The Vue phases (0–9) are complete; the Go backend in `server/` is being built step by step._
 
 This file shows the project as it currently stands. It is updated at the end of every phase and only diagrams what exists. The frontend sections come first; the **Go backend** section is near the end.
 
@@ -189,6 +189,8 @@ classDiagram
     +load() Promise
     +settled() Promise
     +refreshIfBehind(version) Promise
+    +startListening()
+    +stopListening()
     +dismissNotice()
     +boardList: Board[]
     +columnsForBoard(boardId) Column[]
@@ -369,6 +371,7 @@ flowchart TD
   api --> kanban["internal/kanban<br/>model, validation, Store"]
   kanban --- types["types.go, store.go (Snapshot, CardPatch)<br/>validate.go, seed.go, id.go, errors.go"]
   kanban --- mem["memory.go<br/>Memory: Store behind a sync.Mutex<br/>(used by tests)"]
+  api --- hub["internal/api/hub.go, events.go<br/>Hub goroutine + GET /api/events"]
   kanban --- sql["sqlite.go, migrate.go<br/>SQLite: Store on database/sql<br/>migrations/*.sql (embedded)"]
 ```
 
@@ -469,8 +472,26 @@ flowchart LR
 - `decodeBody` caps the body size, rejects unknown fields and trailing data.
 - `main.go` opens `kanban.OpenSQLite(ctx, *dbPath)` (flag `-db`, default `kanban.db`), seeds it on first run with `EnsureSeeded`, and passes it to `api.New(store, log).Handler()`.
 
+### Live updates
+
+`Hub` (`internal/api/hub.go`) is one goroutine that owns the set of subscribers; other goroutines talk to it only through channels. Every successful write handler calls `s.wrote(version)`, which publishes the version to the hub.
+
+```mermaid
+flowchart LR
+  w["write handlers<br/>(state.go, resources.go)"] -- "Publish(version)" --> pub(["publish chan"])
+  sub(["subscribe / unsubscribe chans"]) --> hub
+  pub --> hub{{"Hub.Run goroutine<br/>select loop, owns the subscriber set"}}
+  hub -- "buffered chan per client<br/>(full buffer → client dropped)" --> ev["events handler<br/>one goroutine per open GET /api/events"]
+  ev -- "event: version<br/>data: {version}" --> es["browser EventSource<br/>(useServerSync.startListening)"]
+  es -- "version > local version<br/>→ GET /api/state" --> store["kanban store"]
+```
+
+- A new connection first receives the current version, so a reconnecting tab catches up.
+- A request's context being cancelled (client closed the tab) ends the handler and unsubscribes it.
+- `App.vue` starts listening on mount and stops on unmount. A tab's own writes echo back as events but are ignored, because the reply to the write already moved its version forward.
+
 ## Not built yet
 
 Nothing from the Vue plan. Optional stretch goals in `CLAUDE.md` (only if asked): a Nuxt port, touch drag and drop, undo/redo.
 
-Go backend, still to come: live updates (7), embedded frontend (8).
+Go backend, still to come: embedded frontend (8).

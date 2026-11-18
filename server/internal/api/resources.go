@@ -72,7 +72,7 @@ func (s *Server) addBoard(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, boardReply{Version: version, Board: board})
+	writeJSON(w, http.StatusCreated, boardReply{Version: s.wrote(version), Board: board})
 }
 
 func (s *Server) addColumn(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +86,7 @@ func (s *Server) addColumn(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, columnReply{Version: version, Column: column})
+	writeJSON(w, http.StatusCreated, columnReply{Version: s.wrote(version), Column: column})
 }
 
 func (s *Server) addCard(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +100,7 @@ func (s *Server) addCard(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, cardReply{Version: version, Card: card})
+	writeJSON(w, http.StatusCreated, cardReply{Version: s.wrote(version), Card: card})
 }
 
 func (s *Server) updateCard(w http.ResponseWriter, r *http.Request) {
@@ -114,7 +114,7 @@ func (s *Server) updateCard(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, cardReply{Version: version, Card: card})
+	writeJSON(w, http.StatusOK, cardReply{Version: s.wrote(version), Card: card})
 }
 
 func (s *Server) moveCard(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +136,7 @@ func (s *Server) moveCard(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, versionReply{Version: version})
+	writeJSON(w, http.StatusOK, versionReply{Version: s.wrote(version)})
 }
 
 // rename builds the handler for a PATCH that changes a title. The same code serves boards and
@@ -153,7 +153,7 @@ func (s *Server) rename(param string, change func(ctx context.Context, id, title
 			s.fail(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, versionReply{Version: version})
+		writeJSON(w, http.StatusOK, versionReply{Version: s.wrote(version)})
 	}
 }
 
@@ -165,6 +165,6 @@ func (s *Server) remove(param string, del func(ctx context.Context, id string) (
 			s.fail(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, versionReply{Version: version})
+		writeJSON(w, http.StatusOK, versionReply{Version: s.wrote(version)})
 	}
 }

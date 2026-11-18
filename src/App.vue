@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted } from 'vue'
 import { RouterView } from 'vue-router'
 import SyncNotice from '@/components/SyncNotice.vue'
 import { provideTheme } from '@/composables/useTheme'
@@ -10,6 +11,10 @@ provideTheme()
 // The data lives on the server now, so nothing can render until it has arrived.
 const store = useKanbanStore()
 store.ensureLoaded()
+
+// Live updates: when another tab changes something, the server says so and the store reloads.
+onMounted(() => store.startListening())
+onBeforeUnmount(() => store.stopListening())
 
 // A full reload re-runs the route guards against the freshly loaded data.
 function retry() {

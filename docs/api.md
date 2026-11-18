@@ -2,7 +2,7 @@
 
 The HTTP API the Vue app talks to. It is written in a language-neutral way: any backend that implements this document (the Go server in `server/` today; a Ruby one could follow) can be used by pointing the app's `KANBAN_API` at it.
 
-_Last updated: Go step 6 (per-action endpoints). Endpoints are added here as they are built._
+_Last updated: Go step 7 (live updates). Endpoints are added here as they are built._
 
 ## Conventions
 
@@ -87,3 +87,21 @@ Details:
 - **Moving** puts the card at `index` among the cards of `columnId` *without the moving card* (so within a column it is the index the card ends up at). An index outside the column is clamped: `-1` means first and a huge number means last. Both fields are required, and `index` must be a whole number.
 - **400** for an empty title, a missing required field, an unknown field, or a field of the wrong type.
 - `PATCH` is used where a request changes *some* fields of a resource (rename, edit a card). `PUT` is used for the position because the request states a whole value (the card's place), and repeating it changes nothing more.
+
+## Live updates
+
+### `GET /api/events`
+
+A [server-sent events](https://html.spec.whatwg.org/multipage/server-sent-events.html) stream (`Content-Type: text/event-stream`), for clients that want to know when the state changes.
+
+```
+event: version
+data: {"version":7}
+
+```
+
+- One `version` event is sent as soon as the client connects, carrying the current version, and another after every successful write by any client, carrying the version that write produced. Failed writes send nothing.
+- The event only says *that* the state changed. A client that is behind (its version is lower) fetches `GET /api/state`. A client that is already at that version ignores it, which is the case for the echo of its own write.
+- Versions can arrive out of order when writes overlap; clients keep the highest.
+- Lines starting with `:` are keep-alive comments (sent about every 25 seconds) and carry no data.
+- A server may close the stream of a client that does not read it fast enough. `EventSource` reconnects by itself and the first event after reconnecting brings it up to date.

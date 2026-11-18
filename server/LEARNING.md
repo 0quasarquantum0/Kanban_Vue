@@ -297,3 +297,47 @@ Note that `deleteBoard` removes the columns and cards locally but sends *one* `D
 ### Bypassing actions is a bug now
 
 Two components used to write straight into store objects: `v-model="board.title"` and `v-model:title="column.title"`. With the step-4 deep watch that was fine, since any change was saved. With explicit actions the screen would change but no request would be sent. They now use `:model-value` plus `@update:model-value="store.renameBoard(...)"`, which is what `v-model` expands to. `src/__tests__/renames.spec.ts` renames through the real components and checks that the server heard about it.
+
+## Step 7 — Live updates with server-sent events
+
+This is the step where Go earns its reputation.
+
+### Server-sent events
+
+SSE is a one-way stream over a normal HTTP response: the server keeps the response open and writes lines like `event: version` / `data: {"version":7}` followed by a blank line. The browser's built-in `EventSource` reads it, parses the events and **reconnects by itself** when the connection drops. It is much simpler than WebSockets when only the server needs to talk (compare polling with `setInterval`, which wastes requests, or a library like Socket.IO). The handler is `events` in `internal/api/events.go:24`; the client is `startListening` in `src/composables/useServerSync.ts:96`. The event only says *that* the state changed (its new version); the client then fetches the state with the normal `GET /api/state`, so there is still one way to read data.
+
+A handler that streams must **flush** after every write, or Go buffers the bytes. `http.NewResponseController(w).Flush()` (`internal/api/events.go:25`) does that and also works through our logging wrapper, because `statusRecorder` has an `Unwrap` method (step 3's `TestStatusRecorderKeepsFlushAvailable` guards this).
+
+### Goroutines
+
+A **goroutine** is a function running concurrently with the rest of the program, started with the `go` keyword (`go hub.Run(ctx)`, `internal/api/server.go:27`). It is not an OS thread: a goroutine costs a few kilobytes, so a server with ten thousand open streams just has ten thousand goroutines. Each HTTP request already runs in its own goroutine, which is why the store needed a mutex in step 2, and why each open `/api/events` connection simply *blocks* inside its handler for as long as the browser tab lives. The JavaScript equivalent of that is awkward: the browser's event loop has one thread, and long-lived work is written as callbacks or `async`/`await`, so "wait for something" must never block. In Go, blocking is normal and cheap; the runtime runs other goroutines meanwhile.
+
+### Channels
+
+A **channel** is a typed pipe between goroutines: `make(chan int64, 16)`, `ch <- v` to send, `v := <-ch` to receive. An unbuffered channel makes sender and receiver meet; a buffered one (the `16`) lets the sender get ahead by that many values. `close(ch)` tells receivers "no more": `v, ok := <-ch` gives `ok == false` afterwards, and `for v := range ch` ends. Think of a channel as an `async` queue that is built into the language, with the waiting part handled for you. See the five channels in `NewHub` (`internal/api/hub.go:37`).
+
+### `select`
+
+`select` waits on several channel operations at once and runs the one that is ready first (`internal/api/hub.go:60` onwards). It is like `Promise.race` over a list of events, wrapped in a loop. `Hub.Run` is one big `for { select { ... } }`: cancelled? new subscriber? unsubscriber? a version to publish? A `select` with a `default:` branch never waits: `internal/api/hub.go:78` tries to send to a client's buffer and, if it is full, falls to `default` and drops that client instead of letting one slow browser hold up everyone.
+
+### "Share memory by communicating"
+
+The hub keeps a set of subscribers. In step 2 we guarded shared data with a mutex. Here, only *one goroutine*, `Hub.Run`, ever touches the set; everyone else sends it a message on a channel (`Subscribe`, `Publish`, `cancel`). With one owner there is nothing to lock and no way to forget to. The Go proverb is "do not communicate by sharing memory; share memory by communicating". Both styles are valid: use a mutex for a small piece of shared data (the `Memory` store) and a goroutine that owns state for a coordinating job (the hub).
+
+Compare the Vue app: a Pinia store is also "one owner of the state, changed through actions", just on a single thread.
+
+### `context` cancellation
+
+`r.Context()` is cancelled the moment the client disconnects, so the handler's `select` has a `case <-r.Context().Done()` (`internal/api/events.go:53`) and returns, which runs the `defer cancel()` that unsubscribes. Nobody calls "on close" by hand. The hub itself stops when the context passed to `Run` is cancelled (`Server.Close`, `internal/api/server.go:32`), and it then closes every subscriber's channel, which ends every open stream. Context cancellation is Go's equivalent of `AbortController`, and it travels down through every function that takes a `ctx`, including database calls.
+
+### Closing channels, and `sync.Once`
+
+Only a channel's *sender side* should close it, and closing twice panics. The hub is the only closer (`drop` in `Run`), and the `cancel` function handed to callers uses `sync.Once` (`internal/api/hub.go:105`) so calling it twice is harmless. `TestHubStopsDeliveringAfterACancel` cancels twice on purpose.
+
+### Testing concurrent code
+
+The hub is tested without HTTP (`internal/api/hub_test.go`): subscribe, publish, check what arrives. Slow-client handling is tested by a subscriber that never reads (`TestHubDropsASlowSubscriberWithoutBlockingTheOthers`, line 79). The endpoint is tested with `httptest.NewServer` (`internal/api/events_test.go:20`), which starts a real server on a local port, because a `ResponseRecorder` cannot be read while the handler is still running. Tests that wait use a timeout (`time.After(2 * time.Second)`) so a bug fails the test instead of hanging it. The Go race detector (`go test -race`) is the standard extra check for this kind of code; on this machine it needs a C compiler that is not installed, so the tests were not run with it (see the final summary).
+
+### Frontend: refetch when the version is newer
+
+When an event's version is greater than the one the store holds, someone else changed the data, so the store reloads (`refreshIfBehind`). The server sends the current version first on every connection, so a tab that missed events while offline catches up when `EventSource` reconnects. A tab's own writes also produce events; they are ignored because the reply to the write has already moved `version` forward, and `refreshIfBehind` waits for the queue to finish first. `App.vue` opens the stream in `onMounted` and closes it in `onBeforeUnmount`, the Vue counterpart of `useEffect` with a cleanup function.

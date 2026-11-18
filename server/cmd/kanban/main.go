@@ -45,9 +45,11 @@ func run(log *slog.Logger, addr, dbPath string) error {
 	}
 	log.Info("database ready", "path", dbPath)
 
+	app := api.New(store, log)
+	defer app.Close()
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           api.New(store, log).Handler(),
+		Handler:           app.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Info("listening", "addr", addr)

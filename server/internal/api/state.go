@@ -42,5 +42,5 @@ func (s *Server) putState(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]int64{"version": version})
+	writeJSON(w, http.StatusOK, map[string]int64{"version": s.wrote(version)})
 }

@@ -77,9 +77,36 @@ export function useServerSync(state: Ref<KanbanState>) {
 
   /** Reloads if the server has moved past `target` and this tab has not caught up. */
   async function refreshIfBehind(target: number): Promise<void> {
-    await settled()
+    await ensureLoaded()
+    await settled() // our own writes first: their replies may bring us up to date
     if (version.value >= target) return
     await load()
+  }
+
+  // --- live updates ---
+
+  let source: EventSource | null = null
+
+  /**
+   * Opens the server's event stream (GET /api/events). Each event carries the server's latest
+   * version; when it is newer than ours, someone else wrote, so we reload. The browser
+   * reconnects by itself after a dropped connection, and the server's first event on every
+   * connection brings us up to date with anything missed meanwhile.
+   */
+  function startListening(): void {
+    if (source || typeof EventSource === 'undefined') return
+    source = new EventSource('/api/events')
+    source.addEventListener('version', (event) => {
+      const data: unknown = JSON.parse(event.data)
+      if (typeof data === 'object' && data !== null && 'version' in data) {
+        if (typeof data.version === 'number') void refreshIfBehind(data.version)
+      }
+    })
+  }
+
+  function stopListening(): void {
+    source?.close()
+    source = null
   }
 
   // --- writing ---
@@ -162,6 +189,8 @@ export function useServerSync(state: Ref<KanbanState>) {
     load,
     ensureLoaded,
     refreshIfBehind,
+    startListening,
+    stopListening,
     settled,
     enqueue,
     dismissNotice,

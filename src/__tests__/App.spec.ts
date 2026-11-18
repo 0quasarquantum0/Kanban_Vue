@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import App from '@/App.vue'
 import router from '@/router'
+import { FakeEventSource, installFakeEventSource } from './fakeEventSource'
 import { installFakeServer, type FakeServer } from './fakeServer'
 
 let server: FakeServer
@@ -14,6 +15,7 @@ function mountApp() {
 describe('App', () => {
   beforeEach(async () => {
     server = installFakeServer()
+    installFakeEventSource()
     await router.push('/')
   })
 
@@ -40,5 +42,17 @@ describe('App', () => {
     expect(wrapper.get('[role="alert"]').text()).toContain("Can't load your boards")
     expect(wrapper.text()).toContain('Could not reach the server')
     expect(wrapper.find('button').text()).toBe('Try again')
+  })
+
+  it('listens for live updates while mounted and stops when unmounted', async () => {
+    const wrapper = mountApp()
+    await flushPromises()
+
+    expect(FakeEventSource.instances).toHaveLength(1)
+    expect(FakeEventSource.instances[0]?.closed).toBe(false)
+
+    wrapper.unmount()
+
+    expect(FakeEventSource.instances[0]?.closed).toBe(true)
   })
 })

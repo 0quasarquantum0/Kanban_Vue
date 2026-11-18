@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { FakeEventSource, installFakeEventSource } from '@/__tests__/fakeEventSource'
 import { installFakeServer, type FakeServer } from '@/__tests__/fakeServer'
 import { createSeedState } from '@/seed'
 import { useKanbanStore } from '@/stores/kanban'
@@ -24,6 +25,7 @@ function firstColumn(store: ReturnType<typeof useKanbanStore>) {
 describe('server sync (through the kanban store)', () => {
   beforeEach(() => {
     server = installFakeServer()
+    installFakeEventSource()
     setActivePinia(createPinia())
   })
 
@@ -351,6 +353,83 @@ describe('server sync (through the kanban store)', () => {
 
       expect(store.boardList.map((board) => board.title)).toContain('In flight')
       expect(Object.values(server.state.boards).map((board) => board.title)).toContain('In flight')
+    })
+  })
+
+  describe('live updates (server-sent events)', () => {
+    function source() {
+      const [first] = FakeEventSource.instances
+      if (!first) throw new Error('no EventSource was opened')
+      return first
+    }
+
+    it('opens one connection to /api/events, however often it is asked', async () => {
+      const store = await loadedStore()
+
+      store.startListening()
+      store.startListening()
+
+      expect(FakeEventSource.instances).toHaveLength(1)
+      expect(source().url).toBe('/api/events')
+    })
+
+    it('reloads when an event announces a newer version', async () => {
+      const store = await loadedStore()
+      store.startListening()
+      const elsewhereId = crypto.randomUUID()
+      server.state.boards[elsewhereId] = {
+        id: elsewhereId,
+        title: 'From another tab',
+        columnIds: [],
+      }
+      server.version += 1
+
+      source().emitVersion(server.version)
+      await vi.waitFor(() =>
+        expect(store.boardList.map((board) => board.title)).toContain('From another tab'),
+      )
+
+      expect(store.version).toBe(server.version)
+    })
+
+    it('ignores an event for a version it already has', async () => {
+      const store = await loadedStore()
+      store.startListening()
+
+      source().emitVersion(store.version) // what the server sends right after connecting
+      await store.settled()
+
+      expect(server.requests).toEqual([])
+    })
+
+    it('does not reload for the echo of its own write', async () => {
+      const store = await loadedStore()
+      store.startListening()
+
+      store.addBoard('Mine')
+      source().emitVersion(server.version + 1) // the event can arrive before the reply is read
+      await store.settled()
+      await store.refreshIfBehind(0)
+
+      expect(server.requests).toEqual(['POST /api/boards'])
+    })
+
+    it('stops listening when asked', async () => {
+      const store = await loadedStore()
+      store.startListening()
+
+      store.stopListening()
+
+      expect(source().closed).toBe(true)
+      store.startListening() // and can start again
+      expect(FakeEventSource.instances).toHaveLength(2)
+    })
+
+    it('does nothing where EventSource does not exist', async () => {
+      vi.stubGlobal('EventSource', undefined)
+      const store = await loadedStore()
+
+      expect(() => store.startListening()).not.toThrow()
     })
   })
 })
