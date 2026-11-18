@@ -1,6 +1,6 @@
 # Architecture
 
-_Last updated: Go step 4 (the Vue app talks to the Go server). The Vue phases (0–9) are complete; the Go backend in `server/` is being built step by step._
+_Last updated: Go step 5 (SQLite persistence). The Vue phases (0–9) are complete; the Go backend in `server/` is being built step by step._
 
 This file shows the project as it currently stands. It is updated at the end of every phase and only diagrams what exists. The frontend sections come first; the **Go backend** section is near the end.
 
@@ -366,7 +366,8 @@ flowchart TD
   main["cmd/kanban/main.go<br/>flags, server"] --> api["internal/api<br/>routes, handlers, middleware"]
   api --> kanban["internal/kanban<br/>model, validation, Store"]
   kanban --- types["types.go, store.go (Snapshot, CardPatch)<br/>validate.go, seed.go, id.go, errors.go"]
-  kanban --- mem["memory.go<br/>Memory: Store behind a sync.Mutex"]
+  kanban --- mem["memory.go<br/>Memory: Store behind a sync.Mutex<br/>(used by tests)"]
+  kanban --- sql["sqlite.go, migrate.go<br/>SQLite: Store on database/sql<br/>migrations/*.sql (embedded)"]
 ```
 
 `internal/` means nothing outside `server/` can import these packages.
@@ -397,12 +398,54 @@ classDiagram
     -state State
     -version int64
   }
+  class SQLite {
+    -db *sql.DB
+  }
   Store <|.. Memory
+  Store <|.. SQLite
 ```
 
 - The Go types (`Board`, `Column`, `Card`, `State`) mirror `src/types.ts`; `State` also carries `BoardOrder` so the order of boards survives JSON (a Go map has no order).
 - `Validate` ports `src/validation.ts` and adds: every column must be listed by a board and every card by a column.
-- `testStore` (`internal/kanban/store_suite_test.go`) is the one behaviour test suite every `Store` implementation runs.
+- `testStore` (`internal/kanban/store_suite_test.go`) is the one behaviour test suite every `Store` implementation runs: `Memory` and `SQLite` both pass it.
+
+### Database schema
+
+SQLite, created by `internal/kanban/migrations/001_init.sql`, which `migrate` applies at startup (applied files are recorded in `schema_migrations`). Order is an integer `position` within the parent; foreign keys cascade, so deleting a board removes its columns and their cards.
+
+```mermaid
+erDiagram
+  meta {
+    int id "always 1"
+    int version "raises on every write"
+  }
+  boards ||--o{ columns : "board_id, ON DELETE CASCADE"
+  columns ||--o{ cards : "column_id, ON DELETE CASCADE"
+  boards {
+    text id PK
+    text title
+    int position
+  }
+  columns {
+    text id PK
+    text board_id FK
+    text title
+    int position
+  }
+  cards {
+    text id PK
+    text column_id FK
+    text title
+    text description
+    text labels "JSON array"
+    text due_date "nullable"
+    text created_at
+    int position
+  }
+```
+
+- Every write runs in one transaction (`SQLite.transact`) that also bumps `meta.version`. Moving a card is one transaction of three updates.
+- The connection pool is limited to one connection; `foreign_keys`, `busy_timeout` and WAL are set in the DSN.
 
 ### Request flow
 
@@ -421,10 +464,10 @@ flowchart LR
 
 - `GET /api/state` returns `{ version, state }`; `PUT /api/state` takes the same shape, validates it, checks the version (stale → 409) and saves it.
 - `decodeBody` caps the body size, rejects unknown fields and trailing data.
-- `main.go` wires `kanban.NewMemory()` (seeded on first run with `EnsureSeeded`) into `api.New(store, log).Handler()`.
+- `main.go` opens `kanban.OpenSQLite(ctx, *dbPath)` (flag `-db`, default `kanban.db`), seeds it on first run with `EnsureSeeded`, and passes it to `api.New(store, log).Handler()`.
 
 ## Not built yet
 
 Nothing from the Vue plan. Optional stretch goals in `CLAUDE.md` (only if asked): a Nuxt port, touch drag and drop, undo/redo.
 
-Go backend, still to come: SQLite (5), per-action endpoints (6), live updates (7), embedded frontend (8).
+Go backend, still to come: per-action endpoints (6), live updates (7), embedded frontend (8).

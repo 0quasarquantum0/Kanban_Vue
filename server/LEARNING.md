@@ -216,3 +216,47 @@ The server keeps one `version` that goes up on every write; a `PUT /api/state` m
 ### Testing against a fake server
 
 The frontend tests no longer use `localStorage`; `src/__tests__/fakeServer.ts` replaces the global `fetch` with a function that behaves like the Go server's `/api/state` (including the version check). The tests read and change its `version` and `state` to set up scenarios, such as "another tab saved first". It plays the role MSW would, with nothing to install.
+
+## Step 5 — SQLite persistence
+
+### `database/sql`: a pool, not a connection
+
+`sql.DB` (`internal/kanban/sqlite.go:20`) is not one connection but a **pool** of them, safe to share between goroutines, so you open it once and keep it. You rarely touch connections yourself: `db.ExecContext` runs a statement that returns no rows, `db.QueryContext` returns rows you loop over, `db.QueryRowContext` returns at most one. `database/sql` is only an interface; the actual SQLite code lives in a *driver* that registers itself. It is closer to `pg` or `better-sqlite3` than to an ORM such as Prisma: you write SQL and map the columns yourself.
+
+`db.SetMaxOpenConns(1)` (`internal/kanban/sqlite.go:44`) limits the pool to one connection, so every query takes its turn. For a small app on SQLite, that is simpler and safer than juggling locks.
+
+### Placeholders, `Scan` and `NULL`
+
+Values go in as `?` placeholders (`WHERE id = ?`), never pasted into the SQL string, which prevents SQL injection. (The few `table`/`column` names that *are* concatenated, such as in `internal/kanban/sqlite.go:239`, are constants from this file, since SQL cannot take a name as a `?`.) `rows.Scan(&a, &b)` copies the current row's columns into pointers to your variables, in order, which is why Go uses pointers so much here. A nullable column cannot be scanned into a plain `string`, so the due date uses `sql.NullString` and its `.Valid` flag (`internal/kanban/sqlite.go:158`); going the other way, a `*string` argument that is `nil` is stored as `NULL`.
+
+Two habits show up everywhere: `defer rows.Close()` (rows hold the connection until closed) and checking `rows.Err()` after the loop (a loop can end because of an error, not just the last row).
+
+### Transactions and `defer tx.Rollback()`
+
+A transaction groups statements so they all happen or none do. `transact` (`internal/kanban/sqlite.go:58`) begins one, runs a function, and commits only if it succeeded. The line `defer func() { _ = tx.Rollback() }()` is the idiom: whichever way the function exits, Rollback runs; if Commit already happened it does nothing (`sql.ErrTxDone`), and if an error returned early it undoes everything. You never write rollback calls at each `return err`. Moving a card is three statements (close the gap, open a gap, drop the card in); without the transaction, a crash between them would lose or duplicate a card (`internal/kanban/sqlite.go:462`). This is the same reason the Pinia `moveCard` must splice the card out and in without anything rendering in between.
+
+### Higher-order functions in Go
+
+`transact(ctx, func(tx *sql.Tx) error {...})` takes a function as an argument, like a callback in JavaScript. The caller writes only the interesting part; `transact` owns begin, version bump, commit and rollback, so no method can forget one. Closures are how results get out: `AddBoard` assigns to a `board` variable declared outside the function it passes in (`internal/kanban/sqlite.go:274`).
+
+### `embed` and migrations
+
+`//go:embed migrations/*.sql` (`internal/kanban/sqlite.go:15`) is a *compiler directive*, not a comment: it puts those files **inside the executable** as an `embed.FS`, a read-only file system. The deployed binary needs no loose `.sql` files next to it (compare `import sql from './001_init.sql?raw'` in Vite, but for any file type). `migrate` (`internal/kanban/migrate.go:24`) takes an `fs.FS` interface rather than the concrete `embed.FS`, so the tests can pass an in-memory `fstest.MapFS` (`internal/kanban/migrate_test.go:46`) with made-up migrations; a good example of "accept interfaces, return structs".
+
+The migration runner records applied files in a `schema_migrations` table, so each runs exactly once, and each file runs in a transaction with its own bookkeeping row. To change the schema later, you add `002_something.sql` and never edit `001`.
+
+### The blank import
+
+`_ "modernc.org/sqlite"` (`internal/kanban/sqlite.go:12`) imports a package only for its side effect. The package's `init()` function registers a driver named `"sqlite"` with `database/sql`, and `sql.Open("sqlite", ...)` finds it by that name. The `_` tells the compiler "I know I never use this name". The same trick is used by image decoders and by `net/http/pprof`. (It is also why the file `go.sum`, a lockfile of hashes, appeared.) `modernc.org/sqlite` is SQLite translated into pure Go, so building needs no C compiler; the price is a larger binary and somewhat slower queries.
+
+### SQL details worth knowing
+
+`ON DELETE CASCADE` makes the database delete a column's cards when the column goes (`internal/kanban/migrations/001_init.sql:21`); it only works because the connection turns on `PRAGMA foreign_keys` (off by default in SQLite), set through the DSN in `OpenSQLite`. The tests prove both: `TestSQLiteEnforcesForeignKeysAndCascades`. Order is an integer `position`, kept dense (0, 1, 2, ...) by shifting siblings on insert and delete; `TestSQLiteKeepsPositionsDense` checks it after a series of moves. `UPDATE meta SET version = version + 1 RETURNING version` bumps and reads the version in one statement.
+
+### Why `Store` is an interface
+
+`testStore` (`internal/kanban/store_suite_test.go:16`) runs the same 30 tests against `Memory` (`internal/kanban/memory_test.go:6`) and `SQLite` (`internal/kanban/sqlite_test.go:27`). The HTTP layer in `internal/api` never changed to use SQLite: `main.go` builds a different value and passes it to the same `api.New`. In TypeScript you would write an interface and two classes; the Go difference is that neither type mentions the interface at all.
+
+### Reading the `-db` flag
+
+`flag.String("db", "kanban.db", ...)` (`cmd/kanban/main.go:19`) gives the database path. The file `kanban.db` (plus `-wal` and `-shm` files, because the connection uses write-ahead logging) is created in the directory where you run the server, and is git-ignored.

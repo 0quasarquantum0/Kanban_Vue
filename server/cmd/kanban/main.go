@@ -16,10 +16,11 @@ import (
 
 func main() {
 	addr := flag.String("addr", ":8080", "address to listen on")
+	dbPath := flag.String("db", "kanban.db", "path of the SQLite database file (created if missing)")
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	if err := run(log, *addr); err != nil {
+	if err := run(log, *addr, *dbPath); err != nil {
 		log.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
@@ -27,11 +28,22 @@ func main() {
 
 // run wires the pieces together and serves until the server fails. Returning an error to main
 // (instead of calling os.Exit in here) keeps deferred cleanups working.
-func run(log *slog.Logger, addr string) error {
-	store := kanban.NewMemory()
-	if err := kanban.EnsureSeeded(context.Background(), store); err != nil {
+func run(log *slog.Logger, addr, dbPath string) error {
+	ctx := context.Background()
+
+	store, err := kanban.OpenSQLite(ctx, dbPath)
+	if err != nil {
 		return err
 	}
+	defer func() {
+		if err := store.Close(); err != nil {
+			log.Error("closing the database", "error", err)
+		}
+	}()
+	if err := kanban.EnsureSeeded(ctx, store); err != nil {
+		return err
+	}
+	log.Info("database ready", "path", dbPath)
 
 	srv := &http.Server{
 		Addr:              addr,
