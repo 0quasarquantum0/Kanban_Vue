@@ -1,6 +1,6 @@
 # Architecture
 
-_Last updated: Go step 2 (in-memory store). The Vue phases (0–9) are complete; the Go backend in `server/` is being built step by step._
+_Last updated: Go step 3 (whole-state HTTP API). The Vue phases (0–9) are complete; the Go backend in `server/` is being built step by step._
 
 This file shows the project as it currently stands. It is updated at the end of every phase and only diagrams what exists. The frontend sections come first; the **Go backend** section is near the end.
 
@@ -320,7 +320,7 @@ Lives in `server/` (its own Go module). See `server/CLAUDE.md` for the plan and 
 
 ```mermaid
 flowchart TD
-  main["cmd/kanban/main.go<br/>flags, server"] --> api["internal/api<br/>routes, handlers"]
+  main["cmd/kanban/main.go<br/>flags, server"] --> api["internal/api<br/>routes, handlers, middleware"]
   api --> kanban["internal/kanban<br/>model, validation, Store"]
   kanban --- types["types.go, store.go (Snapshot, CardPatch)<br/>validate.go, seed.go, id.go, errors.go"]
   kanban --- mem["memory.go<br/>Memory: Store behind a sync.Mutex"]
@@ -361,8 +361,27 @@ classDiagram
 - `Validate` ports `src/validation.ts` and adds: every column must be listed by a board and every card by a column.
 - `testStore` (`internal/kanban/store_suite_test.go`) is the one behaviour test suite every `Store` implementation runs.
 
+### Request flow
+
+The contract (methods, paths, bodies, status codes) is in [`api.md`](api.md).
+
+```mermaid
+flowchart LR
+  req["HTTP request"] --> log["logRequests<br/>one slog line per request"]
+  log --> rec["recoverPanics<br/>panic → JSON 500"]
+  rec --> route["jsonRoutingErrors<br/>mux 404/405 → JSON"]
+  route --> mux{"ServeMux<br/>'GET /api/state' …"}
+  mux --> h["handler (state.go)<br/>decodeBody → Store → writeJSON"]
+  h --> store[("kanban.Store")]
+  h -. "error" .-> fail["fail(): ErrInvalid→400,<br/>ErrNotFound→404,<br/>ErrConflict→409, else 500"]
+```
+
+- `GET /api/state` returns `{ version, state }`; `PUT /api/state` takes the same shape, validates it, checks the version (stale → 409) and saves it.
+- `decodeBody` caps the body size, rejects unknown fields and trailing data.
+- `main.go` wires `kanban.NewMemory()` (seeded on first run with `EnsureSeeded`) into `api.New(store, log).Handler()`.
+
 ## Not built yet
 
 Nothing from the Vue plan. Optional stretch goals in `CLAUDE.md` (only if asked): a Nuxt port, touch drag and drop, undo/redo.
 
-Go backend, still to come: HTTP API (step 3), the Vue app calling it (step 4), SQLite (5), per-action endpoints (6), live updates (7), embedded frontend (8).
+Go backend, still to come: the Vue app calling it (step 4), SQLite (5), per-action endpoints (6), live updates (7), embedded frontend (8).

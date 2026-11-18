@@ -144,3 +144,51 @@ Every `Store` method takes `ctx context.Context` first. A context carries cancel
 ### Test fixtures with closures
 
 `run := func(name string, test func(...))` at `internal/kanban/store_suite_test.go:20` is a local function that makes a fresh store for each subtest, like `beforeEach`. Go has no built-in `beforeEach`; a helper function (or `t.Cleanup`) does the same job in plain code.
+
+## Step 3 — HTTP API for whole-state sync
+
+### `http.Handler`, `http.HandlerFunc` and `ServeMux` patterns
+
+Everything that answers HTTP is an `http.Handler`: a value with `ServeHTTP(w http.ResponseWriter, r *http.Request)`. `http.HandlerFunc` is an adapter type that turns a plain function with that signature into a `Handler`, so you rarely write the method yourself (`internal/api/middleware.go:41`). Handlers write to `w` (status, headers, body) and read from `r`; there is no `return` value and no `res.json()` helper: `writeJSON` in `internal/api/json.go:22` is our own. Compare an Express handler `(req, res) => ...` or a Next.js route handler that returns a `Response`.
+
+`ServeMux` is the router. The pattern `"PUT /api/state"` (`internal/api/server.go:27`) matches a method and a path; wildcards like `{boardId}` come in step 6 and are read with `r.PathValue("boardId")`. It is the equivalent of Vue Router's route table, except it is plain code, not a file layout (compare Next.js's file-based routes).
+
+### A server value with methods instead of globals
+
+`Server` (`internal/api/server.go:12`) holds the dependencies (`store`, `log`) and the handlers are methods on it: `s.getState` is a *method value*, a function already bound to `s`. This is dependency injection with no framework: the constructor `New` takes what the server needs, and tests pass a fake. See `failingStore` in `internal/api/server_test.go:40`.
+
+### Embedding
+
+`type failingStore struct{ kanban.Store }` (`internal/api/server_test.go:40`) embeds an interface: `failingStore` automatically has every `Store` method, forwarded to the embedded value, and can override just one (`Snapshot`). It is composition, not inheritance: there is no "super", and the embedded value does not know it was wrapped. `statusRecorder` in `internal/api/middleware.go:12` embeds `http.ResponseWriter` the same way, to wrap a writer while overriding `WriteHeader` and `Write`.
+
+### Middleware
+
+Middleware in Go is a function from a handler to a handler: `func(next http.Handler) http.Handler`. It returns a new handler that does something before and/or after calling `next.ServeHTTP`. `logRequests` (`internal/api/middleware.go:40`) times the request and logs one line; `recoverPanics` (`internal/api/middleware.go:58`) catches a panic; `jsonRoutingErrors` (`internal/api/middleware.go:79`) makes the router's own 404/405 speak JSON. They are stacked in `Handler()`, the outermost first. Compare Express `app.use(...)` or Vue Router's `beforeEach`, but here it is plain function composition.
+
+### `panic`, `recover` and `defer`
+
+`panic` is for bugs (nil pointer, index out of range). It unwinds the stack, running `defer`red functions, until something calls `recover()`. `recoverPanics` does so in a deferred function (`internal/api/middleware.go:60`) and answers 500 instead of letting the request die. Note the rule from step 1: *expected* problems (bad input, a missing board) are returned as `error`s and never panic. `net/http` itself already recovers panics per request, but only to log and close the connection; ours sends a clean JSON error.
+
+### `log/slog`: structured logging
+
+`slog` is the standard library's structured logger: `log.Info("request", "method", r.Method, "status", 200)` writes `msg=request method=GET status=200`, i.e. key/value pairs you can search. Handlers choose the format (text or JSON). The tests give the server a handler that writes to a buffer and read it back (`TestRequestsAreLogged`, `internal/api/server_test.go`).
+
+### Decoding JSON safely
+
+`internal/api/json.go:57` shows the checklist for reading a request body: wrap it in `http.MaxBytesReader` so a client cannot send gigabytes; `dec.DisallowUnknownFields()` so a typo like `"vesion"` is an error, not silently ignored; and after decoding one value, check that nothing but whitespace follows. Without `DisallowUnknownFields`, `encoding/json` quietly drops keys it does not know, unlike TypeScript's type checker which would flag them at compile time, but the *network* has no compile time. The `errors.As` calls (`internal/api/json.go:84`) pick apart *which* failure happened: `errors.Is` asks "is it this exact error?", `errors.As` asks "is there an error of this type in the chain, and give it to me".
+
+### Pointers to tell "missing" from "zero"
+
+In `putState` (`internal/api/state.go:24`) `Version` is `*int64`. If the client omits `version`, a plain `int64` would be `0`, which is a *valid* version, so the server would think the client had seen version 0. With a pointer, omitted means `nil` and we answer 400. The same trick applies to `State *kanban.State`.
+
+### Status codes and mapping errors to them
+
+`fail` (`internal/api/json.go:103`) is the one place that turns an error into an HTTP response: `ErrInvalid` becomes 400, `ErrNotFound` 404, `ErrConflict` 409, anything unknown is logged and answered with a generic 500 so that internals (a file path, an SQL message) do not leak. The `switch` with no expression and `case errors.Is(...)` branches is Go's version of an `if / else if` chain. Handlers never pick a status themselves for store errors; adding a new kind of error means changing one function.
+
+### Sending JSON, and the `any` at the boundary
+
+`writeJSON(w, status, v any)` accepts anything `encoding/json` can encode. `any` (an alias of the empty interface `interface{}`) is Go's `unknown`, and the project rule is to use it only at JSON boundaries like this one. Headers must be set *before* `WriteHeader`, and the status before the first byte of body, because the first write sends the headers.
+
+### Process wiring in `main`
+
+`run` in `cmd/kanban/main.go:30` returns an error to `main`, which logs it and exits with status 1. Calling `os.Exit` deep inside would skip `defer`s; the pattern "`main` calls `run`, `run` returns an error" is the idiomatic way to keep `main` tiny and testable.

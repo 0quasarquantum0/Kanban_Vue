@@ -2,19 +2,34 @@
 package api
 
 import (
-	"encoding/json"
+	"log/slog"
 	"net/http"
+
+	"github.com/bqua0007/kanban-server/internal/kanban"
 )
 
-// NewHandler returns the handler that serves every route of the API.
-func NewHandler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/health", health)
-	return mux
+// Server answers HTTP requests using a Store.
+type Server struct {
+	store kanban.Store
+	log   *slog.Logger
 }
 
-func health(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	// Encode can only fail if the client went away, and there is nothing useful to do then.
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+// New returns a Server that keeps its data in store and logs to log.
+func New(store kanban.Store, log *slog.Logger) *Server {
+	return &Server{store: store, log: log}
+}
+
+// Handler returns the handler that serves every route of the API, wrapped in the middleware.
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/health", s.health)
+	mux.HandleFunc("GET /api/state", s.getState)
+	mux.HandleFunc("PUT /api/state", s.putState)
+
+	// The first wrapper is the outermost: logging sees the 500 that recoverPanics writes.
+	return logRequests(s.log, recoverPanics(s.log, jsonRoutingErrors(mux)))
+}
+
+func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
