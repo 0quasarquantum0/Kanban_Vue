@@ -1,8 +1,8 @@
 # Architecture
 
-_Last updated: phase 9 (tests and build). All planned phases are complete._
+_Last updated: Go step 2 (in-memory store). The Vue phases (0–9) are complete; the Go backend in `server/` is being built step by step._
 
-This file shows the project as it currently stands. It is updated at the end of every phase and only diagrams what exists.
+This file shows the project as it currently stands. It is updated at the end of every phase and only diagrams what exists. The frontend sections come first; the **Go backend** section is near the end.
 
 ## App bootstrap
 
@@ -312,8 +312,57 @@ flowchart LR
 - `FilterBar.spec.ts` uses Vitest fake timers to skip the 300ms debounce.
 - Run once with `npx vitest run`; `npm run test:unit` watches.
 
+## Go backend
+
+Lives in `server/` (its own Go module). See `server/CLAUDE.md` for the plan and `server/LEARNING.md` for the Go concepts, step by step.
+
+### Package layout
+
+```mermaid
+flowchart TD
+  main["cmd/kanban/main.go<br/>flags, server"] --> api["internal/api<br/>routes, handlers"]
+  api --> kanban["internal/kanban<br/>model, validation, Store"]
+  kanban --- types["types.go, store.go (Snapshot, CardPatch)<br/>validate.go, seed.go, id.go, errors.go"]
+  kanban --- mem["memory.go<br/>Memory: Store behind a sync.Mutex"]
+```
+
+`internal/` means nothing outside `server/` can import these packages.
+
+### Store
+
+`Store` is the interface the HTTP layer will use. Every write returns the new `version`; unknown IDs return `ErrNotFound`, bad input `ErrInvalid`, a stale `ReplaceState` `ErrConflict`.
+
+```mermaid
+classDiagram
+  class Store {
+    <<interface>>
+    +Snapshot(ctx) Snapshot
+    +ReplaceState(ctx, baseVersion, State) int64
+    +AddBoard(ctx, id, title) Board
+    +RenameBoard(ctx, boardId, title)
+    +DeleteBoard(ctx, boardId)
+    +AddColumn(ctx, boardId, id, title) Column
+    +RenameColumn(ctx, columnId, title)
+    +DeleteColumn(ctx, columnId)
+    +AddCard(ctx, columnId, id, title) Card
+    +UpdateCard(ctx, cardId, CardPatch) Card
+    +DeleteCard(ctx, cardId)
+    +MoveCard(ctx, cardId, toColumnId, toIndex)
+  }
+  class Memory {
+    -mu sync.Mutex
+    -state State
+    -version int64
+  }
+  Store <|.. Memory
+```
+
+- The Go types (`Board`, `Column`, `Card`, `State`) mirror `src/types.ts`; `State` also carries `BoardOrder` so the order of boards survives JSON (a Go map has no order).
+- `Validate` ports `src/validation.ts` and adds: every column must be listed by a board and every card by a column.
+- `testStore` (`internal/kanban/store_suite_test.go`) is the one behaviour test suite every `Store` implementation runs.
+
 ## Not built yet
 
-Nothing from the plan. Optional stretch goals in `CLAUDE.md` (only if asked): a Nuxt port, touch drag and drop, undo/redo.
+Nothing from the Vue plan. Optional stretch goals in `CLAUDE.md` (only if asked): a Nuxt port, touch drag and drop, undo/redo.
 
-A Go backend is planned in `server/CLAUDE.md` (not started). Its diagrams will be added here as it is built.
+Go backend, still to come: HTTP API (step 3), the Vue app calling it (step 4), SQLite (5), per-action endpoints (6), live updates (7), embedded frontend (8).

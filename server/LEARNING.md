@@ -94,3 +94,53 @@ In step 0 the test was in `package api_test`, an external test that can only use
 ### Constants and layouts for time
 
 `const timestampLayout = "2006-01-02T15:04:05.000Z"` (`internal/kanban/seed.go:6`): Go formats dates by showing the reference time `Mon Jan 2 15:04:05 2006` in the shape you want, rather than with `YYYY-MM-DD` codes. This layout reproduces JavaScript's `toISOString()`, so the frontend can read the dates.
+
+## Step 2 — In-memory store and the board operations
+
+### Methods and receivers
+
+A method is a function with a *receiver* written before its name: `func (m *Memory) AddBoard(...)`. It is how Go attaches behaviour to a type, in place of a `class` (Go has no classes, no inheritance and no `this`; the receiver is an ordinary named parameter). A **pointer receiver** (`*Memory`) gets the original value and can change it; a **value receiver** (`State.Clone`, `internal/kanban/store.go:90`) gets a copy. `Memory` holds a mutex, which must never be copied, so all its methods use pointer receivers (`internal/kanban/memory.go:41`).
+
+### Interfaces are satisfied implicitly
+
+`Store` (`internal/kanban/store.go:44`) is a list of method signatures. `Memory` never says "implements Store": having the methods is enough. This is TypeScript's structural typing, but checked for method sets, and the interface is usually declared *where it is used* rather than next to the implementation. The line `var _ Store = (*Memory)(nil)` (`internal/kanban/memory.go:22`) is a compile-time assertion: assign a nil `*Memory` to a `Store` variable and throw it away, so a missing method breaks the build right there instead of at a distant call site.
+
+Interfaces are why `testStore` in `internal/kanban/store_suite_test.go:16` can take *any* `Store`. The same test list runs against `Memory` now and against SQLite in step 5.
+
+### Why a mutex, and `defer`
+
+The Vue app is single-threaded: two event handlers never run at the same instant. Go's `net/http` serves each request on its own goroutine, so two requests can touch the same map at once, and Go **crashes the program** on concurrent map writes. `sync.Mutex` fixes this: `m.mu.Lock()` makes other goroutines wait until `Unlock()`. `defer m.mu.Unlock()` schedules the unlock for when the function returns, by any path (early return, error), so you cannot forget it; compare `finally` in JavaScript, but attached to the function, not a block. See `internal/kanban/memory.go:43`.
+
+The last test of the suite, "concurrent writes are all applied" (`internal/kanban/store_suite_test.go:474`), starts 25 goroutines that all call `AddCard`. Without the mutex it would crash.
+
+### Goroutines and `sync.WaitGroup` (a first look)
+
+`go func() { ... }()` runs a function concurrently on a goroutine, a very cheap thread managed by Go's runtime (`internal/kanban/store_suite_test.go:481`). The `WaitGroup` counts them: `Add(1)` before starting, `Done()` when each finishes, `Wait()` blocks until the count is zero. Step 7 builds on this; for now read it as "like `Promise.all` over 25 tasks".
+
+### Closures capture variables
+
+The anonymous function above uses `i` and `f` from its surroundings, just as a JavaScript closure does. Since Go 1.22 every iteration of a `for` loop has its *own* `i`, so this is safe. In older Go all closures shared one variable and you had to copy it first.
+
+### Sentinel errors and `%w`
+
+`fmt.Errorf("%s %q: %w", kind, id, ErrNotFound)` (`internal/kanban/memory.go:262`) builds a new error whose message adds context while *wrapping* the original. The wrapped chain is then searchable: `errors.Is(err, kanban.ErrNotFound)` is true. The HTTP layer in step 3 uses exactly this to turn an error into a status code without parsing text. It replaces `instanceof NotFoundError` in TypeScript.
+
+### Generics with state: `Optional[T]`
+
+`Optional[*string]` (`internal/kanban/store.go:17`) solves a JSON problem. For a PATCH, "`dueDate` is missing" (leave it) and "`dueDate` is null" (clear it) must differ. A `*string` cannot tell them apart, since both read as `nil`. Since `encoding/json` only calls `UnmarshalJSON` when the key is *present*, the method can set a flag. TypeScript gets this for free from `undefined` vs `null`; Go has one zero value, so you add the bit yourself. `internal/kanban/patch_test.go:9` shows the three cases.
+
+### Zero values, `nil` slices and copying
+
+Go slices and maps are *references*: assigning one copies a small header, not the data. So `Snapshot` must clone (`State.Clone`, `internal/kanban/store.go:90`), or callers could change the store's internals without holding the lock. `TestMemoryStore/Snapshot returns a copy...` proves it. The same reason explains the `slices.Clone(board.ColumnIDs)` in `DeleteBoard` (`internal/kanban/memory.go:106`): `removeColumn` edits that slice while we loop over it, the same trap the Pinia version avoids with `.slice()`.
+
+### `min`, `max` and the `slices` package
+
+`max(0, min(toIndex, len(...)))` (`internal/kanban/memory.go:254`) are built-in functions since Go 1.21, replacing `Math.max(0, Math.min(...))`. `slices.Insert`, `slices.Delete`, `slices.Index` replace `splice` and `indexOf`, but they return the new slice, so always assign the result.
+
+### `context.Context` as the first argument
+
+Every `Store` method takes `ctx context.Context` first. A context carries cancellation and deadlines: when an HTTP client disconnects, the request's context is cancelled, and a database call that received it can stop early. The in-memory store ignores it (`_ context.Context`), but the SQLite store will not, and the interface is shared. Compare `AbortSignal` passed to `fetch`.
+
+### Test fixtures with closures
+
+`run := func(name string, test func(...))` at `internal/kanban/store_suite_test.go:20` is a local function that makes a fresh store for each subtest, like `beforeEach`. Go has no built-in `beforeEach`; a helper function (or `t.Cleanup`) does the same job in plain code.
