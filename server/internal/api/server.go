@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"time"
@@ -17,6 +18,7 @@ type Server struct {
 	hub       *Hub          // tells connected clients about new versions (see events.go)
 	stopHub   func()        // ends the hub's goroutine
 	heartbeat time.Duration // how often an idle event stream sends a keep-alive line
+	frontend  fs.FS         // the built Vue app, or nil for an API-only server
 }
 
 // New returns a Server that keeps its data in store and logs to log. It starts a goroutine for
@@ -40,8 +42,23 @@ func (s *Server) Handler() http.Handler {
 	s.routeResources(mux)
 	mux.HandleFunc("GET /api/events", s.events)
 
+	api := jsonRoutingErrors(mux)
+	var root http.Handler = api
+	if s.frontend != nil {
+		app := frontendHandler(s.frontend)
+		// /api/... always belongs to the API, so a mistyped API path gets a JSON 404 rather
+		// than the index page.
+		root = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isAPIPath(r.URL.Path) {
+				api.ServeHTTP(w, r)
+			} else {
+				app.ServeHTTP(w, r)
+			}
+		})
+	}
+
 	// The first wrapper is the outermost: logging sees the 500 that recoverPanics writes.
-	return logRequests(s.log, recoverPanics(s.log, jsonRoutingErrors(mux)))
+	return logRequests(s.log, recoverPanics(s.log, root))
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {

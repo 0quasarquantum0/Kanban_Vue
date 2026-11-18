@@ -1,6 +1,6 @@
 # Architecture
 
-_Last updated: Go step 7 (live updates with server-sent events). The Vue phases (0–9) are complete; the Go backend in `server/` is being built step by step._
+_Last updated: Go step 8 (one binary). The Vue phases (0–9) are complete; the Go backend in `server/` is being built step by step._
 
 This file shows the project as it currently stands. It is updated at the end of every phase and only diagrams what exists. The frontend sections come first; the **Go backend** section is near the end.
 
@@ -367,10 +367,12 @@ Lives in `server/` (its own Go module). See `server/CLAUDE.md` for the plan and 
 
 ```mermaid
 flowchart TD
-  main["cmd/kanban/main.go<br/>flags, server"] --> api["internal/api<br/>routes, handlers, middleware"]
+  main["cmd/kanban/main.go<br/>flags, wiring, graceful shutdown"] --> web["web/embed.go<br/>//go:embed all:dist"]
+  main --> api["internal/api<br/>routes, handlers, middleware"]
   api --> kanban["internal/kanban<br/>model, validation, Store"]
   kanban --- types["types.go, store.go (Snapshot, CardPatch)<br/>validate.go, seed.go, id.go, errors.go"]
   kanban --- mem["memory.go<br/>Memory: Store behind a sync.Mutex<br/>(used by tests)"]
+  api --- static["internal/api/static.go<br/>serves the embedded Vue app + index.html fallback"]
   api --- hub["internal/api/hub.go, events.go<br/>Hub goroutine + GET /api/events"]
   kanban --- sql["sqlite.go, migrate.go<br/>SQLite: Store on database/sql<br/>migrations/*.sql (embedded)"]
 ```
@@ -490,8 +492,27 @@ flowchart LR
 - A request's context being cancelled (client closed the tab) ends the handler and unsubscribes it.
 - `App.vue` starts listening on mount and stops on unmount. A tab's own writes echo back as events but are ignored, because the reply to the write already moved its version forward.
 
+### One binary
+
+`npm run build:embed` builds the Vue app into `server/web/dist`; `//go:embed` puts those files inside the Go executable, which then serves both the API and the app.
+
+```mermaid
+flowchart LR
+  vue["src/ (Vue app)"] -- "npm run build:embed<br/>vite build --outDir server/web/dist" --> dist[("server/web/dist<br/>index.html, assets/*<br/>(only .gitkeep is committed)")]
+  dist -- "//go:embed all:dist" --> bin{{"kanban.exe<br/>one file"}}
+  req["request"] --> bin
+  bin -- "/api/..." --> apih["API handlers + middleware"]
+  bin -- "a file that exists" --> file["file (assets: immutable cache)"]
+  bin -- "no extension: /boards/x/cards/y" --> idx["index.html (Vue router takes over)"]
+  bin -- "missing file with an extension" --> nf["404"]
+```
+
+- `main.go` opens the listener, then `run(ctx, log, ln, dbPath, frontend)` serves until the context (cancelled by Ctrl+C or SIGTERM) ends, then calls `http.Server.Shutdown`. `RegisterOnShutdown(app.Close)` ends open event streams so shutdown is not held up.
+- Flags: `-addr` (default `:8080`) and `-db` (default `kanban.db`).
+- In development nothing changes: Vite serves the app on 5173 and proxies `/api` to the Go server.
+
 ## Not built yet
 
 Nothing from the Vue plan. Optional stretch goals in `CLAUDE.md` (only if asked): a Nuxt port, touch drag and drop, undo/redo.
 
-Go backend, still to come: embedded frontend (8).
+Go backend: all planned steps are built (step 9 finishes the docs).

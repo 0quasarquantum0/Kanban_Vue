@@ -341,3 +341,42 @@ The hub is tested without HTTP (`internal/api/hub_test.go`): subscribe, publish,
 ### Frontend: refetch when the version is newer
 
 When an event's version is greater than the one the store holds, someone else changed the data, so the store reloads (`refreshIfBehind`). The server sends the current version first on every connection, so a tab that missed events while offline catches up when `EventSource` reconnects. A tab's own writes also produce events; they are ignored because the reply to the write has already moved `version` forward, and `refreshIfBehind` waits for the queue to finish first. `App.vue` opens the stream in `onMounted` and closes it in `onBeforeUnmount`, the Vue counterpart of `useEffect` with a cleanup function.
+
+## Step 8 — One binary
+
+### `embed.FS`: files inside the executable
+
+`//go:embed all:dist` (`web/embed.go:15`) tells the compiler to copy the folder `dist/` into the program. The variable under it, an `embed.FS`, is a read-only file system you read with the standard `io/fs` functions, so the deployed server needs no `dist/` folder, no `node_modules`, no Node: one file. Compare a Next.js build (a folder, plus Node to run it) or `vite build` output (a folder you must host somewhere).
+
+Two details. First, `//go:embed` can only reach files *inside the package's own directory tree*, never `../dist`. That is why the frontend is built into `server/web/dist` (`npm run build:embed`, which passes `--outDir`) rather than the usual root `dist/`. Second, without the `all:` prefix files whose names start with `.` or `_` are skipped; the committed placeholder `.gitkeep` is one, and without it a fresh clone would not compile because `dist/` would be empty or missing. With the placeholder, `go build` works before the frontend has ever been built, and the page then says how to build it (`TestWithoutABuiltFrontendThePageSaysHowToBuildIt`).
+
+`fs.Sub(dist, "dist")` (`web/embed.go:19`) re-roots the file system so that `index.html` is at `"index.html"` instead of `"dist/index.html"`. Everything that serves files takes an `fs.FS` interface, which is why the tests can pass an in-memory `fstest.MapFS` instead.
+
+### Serving a single-page app
+
+A browser refresh at `/boards/x/cards/y` asks the *server* for that path, and no such file exists; only the Vue router knows what it means. So `frontendHandler` (`internal/api/static.go:27`) has three rules: a real file is served as it is; a path with no extension is a client-side route and gets `index.html`; a missing file *with* an extension (`/assets/old.js`) is a real 404, because answering with HTML would give the browser a confusing syntax error. Hashed asset names (`index-DAdhZSpE.js`) never change content, so they get `Cache-Control: immutable` for a year; `index.html` is `no-cache` so a new build is picked up. This is what Vite's dev server and any static host's "SPA fallback" setting do for you elsewhere.
+
+Paths starting with `/api/` always go to the API (`Handler` in `internal/api/server.go`), so a mistyped API URL still answers with a JSON 404, not the index page.
+
+### `flag`
+
+`flag.String("addr", ":8080", "usage text")` (`cmd/kanban/main.go:24`) declares a command-line option and returns a pointer; `flag.Parse()` fills it in. `kanban -addr :9000 -db /data/boards.db` is the whole configuration interface, and `kanban -h` prints the usage texts. This is `process.argv` with a parser, and the reason you do not need a `.env` file for two settings.
+
+### Graceful shutdown
+
+When you press Ctrl+C a server should stop *accepting* connections but let running requests finish, then close the database. `signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)` (`cmd/kanban/main.go:32`) returns a context that is cancelled when the signal arrives, so shutdown is just another thing that `select`s on `ctx.Done()` (`run` in `cmd/kanban/main.go`). `http.Server.Shutdown` does the draining. One trap, which has a test (`TestShutdownIsGracefulEvenWithAnOpenEventStream`): an open event stream (step 7) never ends by itself, so `Shutdown` would wait for the full ten-second timeout; `srv.RegisterOnShutdown(app.Close)` (`cmd/kanban/main.go:72`) stops the hub first, which closes every stream.
+
+`run` takes a `net.Listener` instead of an address so a test can listen on port 0 (any free port) and learn the real address, then start and stop whole servers in-process. A function that accepts its dependencies as parameters is easy to test, in any language.
+
+### Cross-compiling
+
+Go compiles for any supported system from any system by setting two environment variables: `GOOS=linux GOARCH=arm64 go build ./cmd/kanban` produced a Linux ARM executable on this Windows machine. It works for this project because `modernc.org/sqlite` is pure Go (step 5): a SQLite driver that needs a C compiler would need a cross C compiler too (`CGO_ENABLED=0` makes sure none is used). The Windows build is about 17 MB and contains the Go runtime, the HTTP server, SQLite, the SQL migrations and the whole Vue app. Copy it to a server and run it; there is nothing else to install. That, more than any benchmark, is why Go is popular for tools and services.
+
+### Try it
+
+```bash
+npm run build:embed                 # from the repo root: builds the Vue app into server/web/dist
+cd server
+go build -o kanban.exe ./cmd/kanban
+./kanban.exe -addr :8080 -db kanban.db   # open http://localhost:8080 and refresh on any page
+```
