@@ -48,3 +48,49 @@ A test is a function `func TestXxx(t *testing.T)` in a file ending in `_test.go`
 ### The `-addr` flag
 
 `flag` is the standard library's command-line parser: `flag.String("addr", ":8080", "usage")` returns a `*string` (a pointer, filled in by `flag.Parse()`), so you read it as `*addr`. See `cmd/kanban/main.go:15`. A bare `:8080` means "all interfaces, port 8080".
+
+## Step 1 — Types, seed and validation
+
+### Structs and JSON tags
+
+A `struct` is Go's record type: a fixed list of named, typed fields. Where TypeScript has `interface Card { id: string; ... }` (a compile-time description of a plain object), a Go struct is a real type with a memory layout, and values are created with a literal: `Card{ID: "c", Title: "t"}`. Fields you leave out get their **zero value** (`""`, `0`, `false`, `nil`), so there is no `undefined`. The backtick strings after each field are **struct tags**: `json:"dueDate"` tells `encoding/json` which JSON key to use, because Go field names must be capitalised to be visible to the encoder (`DueDate`) while the frontend's keys are camelCase. See `internal/kanban/types.go:17`.
+
+### Maps, slices and `nil`
+
+`Record<ID, Card>` becomes `map[string]Card`; `string[]` becomes `[]string` (a *slice*: a growable view over an array). Reading a missing map key returns the zero value, and `card, ok := cards[id]` tells you whether it was there. Two traps matter here. A `nil` slice encodes to JSON `null`, not `[]`, so the seed always creates labels as `[]string{}` or a literal list. And a `nil` map is readable but panics on write, so `NewSeedState` makes its maps with `map[string]Card{}` (`internal/kanban/seed.go:64`). Validation uses the nil/empty difference on purpose: a field missing from the JSON stays `nil`, `[]` becomes an empty non-nil slice (`internal/kanban/validate.go:30`).
+
+### Pointers, only for `null`
+
+Go values are copied when passed around; a pointer (`*string`) is the address of a value. The only reason we need one here is that a plain `string` cannot be "absent": `DueDate *string` is `nil` for JSON `null` and points at a string otherwise (`internal/kanban/types.go:22`). Compare `string | null` in TypeScript. The `&seed.dueDate` in `internal/kanban/seed.go:80` takes the address of a variable; since Go 1.22 each loop iteration has its own copy of `seed`, so each card gets its own pointer.
+
+### Errors as values
+
+A Go function that can fail returns an extra `error` result, and the caller must look at it: `if err != nil { return err }`. There are no `try`/`catch` blocks for expected failures (`panic` exists but is for bugs, like `NewID`'s "the OS has no randomness" at `internal/kanban/id.go:15`). `Validate` returns `error` so it can say *what* is wrong, where `isKanbanState` could only answer `false` (`internal/kanban/validate.go:17`).
+
+An error is any value with an `Error() string` method. `errors.New("...")` makes one; the exported ones in `internal/kanban/errors.go:11` are **sentinel errors** that callers compare with `errors.Is(err, kanban.ErrNotFound)`. `invalidError` (`internal/kanban/errors.go:20`) is a small struct that has both a message and an `Is` method, so one error can be shown to the user *and* matched by the HTTP layer to pick a status code.
+
+### Custom JSON encoding
+
+A type can take over its own JSON by implementing `MarshalJSON` / `UnmarshalJSON`. This is where `State` needs it: a JavaScript object keeps its keys in insertion order, and the frontend lists boards in that order, but a Go map does not, and `encoding/json` writes map keys sorted. So `State` carries a separate `BoardOrder` slice (tagged `json:"-"`, "not a JSON field") and writes the boards by hand in that order (`internal/kanban/types.go:73`); reading uses `json.Decoder.Token()` to walk the object key by key (`internal/kanban/types.go:142`). It is the same job as a custom `toJSON`/`JSON.parse` reviver in JS.
+
+### Generics
+
+`func checkReferences[V any](..., entities map[string]V, ...)` (`internal/kanban/validate.go:72`) has a type parameter in square brackets, like `<V>` in TypeScript. It lets one function check boards' columns and columns' cards without caring about the map's value type. Go generics are deliberately small: the constraint `any` means "anything", and `comparable` means "usable with `==`". `writeMap` in `internal/kanban/types.go:105` is another.
+
+### The standard library's `maps` and `slices`
+
+`slices.Sorted(maps.Keys(m))` returns a map's keys in sorted order (`internal/kanban/validate.go:29`). Go randomises map iteration order on purpose, so any code that needs a stable result (like a deterministic error message) must sort. `slices.Equal` is used in the tests instead of a hand-written loop.
+
+### Table-driven tests and `t.Run`
+
+When many cases share the same steps, Go tests put the cases in a slice of structs and loop over it, calling `t.Run(name, func(t *testing.T) {...})` so each case reports separately, like `it.each` in Vitest. See `internal/kanban/validate_test.go:44`, whose rows are the ported cases from `src/__tests__/validation.spec.ts`. Test names are sentences, so a failure reads `TestValidateRejectsBrokenReferences/rejects_a_card_placed_in_two_columns`.
+
+Helpers call `t.Helper()` so a failure points at the calling test line, not the helper (`internal/kanban/validate_test.go:11`). The `for range 1000` in `internal/kanban/id_test.go:24` is Go 1.22's range-over-integer.
+
+### `package kanban` tests vs `package kanban_test`
+
+In step 0 the test was in `package api_test`, an external test that can only use exported names. Here the tests are in `package kanban` itself, so they can reach unexported helpers such as `invalidf`. Both styles are normal; use the external one when you want to test the public surface only.
+
+### Constants and layouts for time
+
+`const timestampLayout = "2006-01-02T15:04:05.000Z"` (`internal/kanban/seed.go:6`): Go formats dates by showing the reference time `Mon Jan 2 15:04:05 2006` in the shape you want, rather than with `YYYY-MM-DD` codes. This layout reproduces JavaScript's `toISOString()`, so the frontend can read the dates.
