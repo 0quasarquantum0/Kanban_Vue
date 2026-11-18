@@ -1,6 +1,6 @@
 # Architecture
 
-_Last updated: phase 8 (polish: themes, shortcuts, accessibility)._
+_Last updated: phase 9 (tests and build). All planned phases are complete._
 
 This file shows the project as it currently stands. It is updated at the end of every phase and only diagrams what exists.
 
@@ -290,6 +290,28 @@ flowchart TD
 - `beforeEnter` only runs when the route is entered, so `BoardDetailView` also renders a "no longer exists" message if its board disappears later.
 - `KanbanCard` links to `{ name: 'card', params: { cardId } }`; the router reuses `boardId` from the current location.
 
+## Tests
+
+```mermaid
+flowchart LR
+  subgraph unit["Unit (no components)"]
+    storeSpec["stores/__tests__/kanban.spec.ts"] --> store["stores/kanban.ts"]
+    valSpec["__tests__/validation.spec.ts"] --> val["validation.ts"]
+  end
+  subgraph comp["Component (@vue/test-utils)"]
+    cardSpec["KanbanCard.spec.ts"] --> card["KanbanCard.vue"]
+    inlineSpec["InlineEdit.spec.ts"] --> inline["InlineEdit.vue"]
+    filterSpec["FilterBar.spec.ts"] --> filter["FilterBar.vue"]
+  end
+  router["components/__tests__/testRouter.ts<br/>real router, memory history, empty route components"]
+  cardSpec -. uses .-> router
+  filterSpec -. uses .-> router
+```
+
+- Component tests mount one component with `global.plugins: [router]`, so `RouterLink`, `useRoute` and `useRouter` behave as in the app.
+- `FilterBar.spec.ts` uses Vitest fake timers to skip the 300ms debounce.
+- Run once with `npx vitest run`; `npm run test:unit` watches.
+
 ## Not built yet
 
-- Component tests, production build check and README: phase 9
+Nothing from the plan. Optional stretch goals in `CLAUDE.md` (only if asked): a Nuxt port, touch drag and drop, undo/redo.
